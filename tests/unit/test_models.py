@@ -121,7 +121,7 @@ class _FakeVcs:
     def upsert_summary(self, body: str) -> None:
         return None
 
-    def suggestion_block(self, anchor: Anchor, code: str) -> str | None:
+    def suggestion_block(self, anchor: Anchor, code: str, replaced_lines: int = 1) -> str | None:
         return None
 
     def read_file(self, path: str, ref: str) -> str | None:

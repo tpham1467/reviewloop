@@ -1,0 +1,12 @@
+{
+  "action": "opened",
+  "number": 5,
+  "pull_request": {
+    "number": 5,
+    "draft": true,
+    "user": {
+      "id": 7,
+      "login": "alice"
+    }
+  }
+}
