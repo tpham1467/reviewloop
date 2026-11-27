@@ -1,0 +1,65 @@
+// Reviews Bitbucket Data Center pull requests with reviewloop.
+// Requires the Jenkins "Generic Webhook Trigger" and "Docker Pipeline" plugins.
+//
+// Bitbucket webhook (events: PR opened, PR comment added) ->
+//   https://jenkins.example.com/generic-webhook-trigger/invoke?token=<value of reviewloop-webhook-token>
+pipeline {
+  agent any
+
+  triggers {
+    GenericTrigger(
+      genericVariables: [
+        [key: 'BB_PROJECT', value: '$.pullRequest.toRef.repository.project.key'],
+        [key: 'BB_REPO',    value: '$.pullRequest.toRef.repository.slug'],
+        [key: 'BB_PR_ID',   value: '$.pullRequest.id'],
+        [key: 'BB_EVENT',   value: '$.eventKey'],
+        [key: 'BB_COMMENT', value: '$.comment.text', defaultValue: ''],
+        [key: 'BB_ACTOR',   value: '$.actor.slug'],
+        [key: 'BB_TARGET',  value: '$.pullRequest.toRef.displayId'],
+      ],
+      tokenCredentialId: 'reviewloop-webhook-token',
+      causeString: 'Bitbucket $BB_EVENT on $BB_PROJECT/$BB_REPO#$BB_PR_ID',
+      regexpFilterText: '$BB_EVENT:$BB_PR_ID',
+      regexpFilterExpression: '^pr:(opened|comment:added):[0-9]+$',
+      printContributedVariables: false,
+      printPostContent: false,
+    )
+  }
+
+  environment {
+    BB_URL = 'https://bitbucket.example.com'
+  }
+
+  stages {
+    stage('Checkout target branch') {
+      steps {
+        checkout([
+          $class: 'GitSCM',
+          branches: [[name: "*/${env.BB_TARGET}"]],
+          userRemoteConfigs: [[
+            url: "https://bitbucket.example.com/scm/${env.BB_PROJECT.toLowerCase()}/${env.BB_REPO}.git",
+            credentialsId: 'reviewloop-bitbucket-git',
+          ]],
+        ])
+      }
+    }
+
+    stage('Review') {
+      agent {
+        docker {
+          image 'ghcr.io/tpham1467/reviewloop:0'
+          args '--entrypoint='
+          reuseNode true
+        }
+      }
+      steps {
+        withCredentials([
+          string(credentialsId: 'reviewloop-bitbucket-token', variable: 'REVIEWLOOP_BITBUCKET_TOKEN'),
+          string(credentialsId: 'reviewloop-agent-api-key', variable: 'ANTHROPIC_API_KEY'),
+        ]) {
+          sh 'reviewloop run'
+        }
+      }
+    }
+  }
+}
