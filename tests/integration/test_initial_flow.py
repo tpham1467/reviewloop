@@ -3,7 +3,7 @@ from pathlib import Path
 from reviewloop.agents.base import AgentTask
 from reviewloop.models import CoverageStatus, Side
 from reviewloop.pipeline.engine import run_flow
-from reviewloop.pipeline.flows import follow_up_flow, initial_flow
+from reviewloop.pipeline.flows import initial_flow
 from reviewloop.state import parse_finding_marker, parse_state_marker
 
 NULL_FINDING = {
@@ -76,7 +76,3 @@ def test_initial_flow_posts_anchored_findings_and_summary(make_ctx, pr_repo, mon
     # The two review branches run in parallel, so only the set of agent steps is fixed.
     assert sorted(ctx.agent.steps()) == ["initial-review", "pr-overview", "quality-gate", "security-review"]
     assert not Path(ctx.workdir).exists()
-
-
-def test_follow_up_flow_is_empty_until_task_12() -> None:
-    assert follow_up_flow() == []

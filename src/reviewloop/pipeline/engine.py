@@ -29,6 +29,14 @@ class StopFlow(Exception):
         self.notice = notice
 
 
+class SwitchFlow(Exception):
+    """Replaces the steps left in a run with `steps`; the flow's own `finally` steps still run at the end."""
+
+    def __init__(self, steps: list[Step]) -> None:
+        super().__init__("flow switched")
+        self.steps = steps
+
+
 Failure = tuple[Step, BaseException]
 
 
@@ -86,13 +94,22 @@ def _report_failure(ctx: RunContext, step: Step, exc: Exception) -> None:
         ctx.log.exception("could not mark the summary failed")
 
 
+def _run_main(steps: list[Step], ctx: RunContext) -> Failure | None:
+    queue = [s for s in steps if s.group != FINALLY]
+    while True:
+        failure: Failure | None = None
+        for batch in _batches(queue):
+            failure = _run_batch(batch, ctx)
+            if failure is not None:
+                break
+        if failure is None or not isinstance(failure[1], SwitchFlow):
+            return failure
+        queue = [s for s in failure[1].steps if s.group != FINALLY]
+
+
 def run_flow(steps: list[Step], ctx: RunContext) -> None:
     """Run `steps` in order; on a failure wait for the group's siblings, mark the summary failed and re-raise."""
-    failure: Failure | None = None
-    for batch in _batches([s for s in steps if s.group != FINALLY]):
-        failure = _run_batch(batch, ctx)
-        if failure is not None:
-            break
+    failure = _run_main(steps, ctx)
     error: BaseException | None = None
     if failure is not None:
         step, exc = failure

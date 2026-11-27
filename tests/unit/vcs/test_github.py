@@ -9,6 +9,7 @@ from github import GithubException
 
 from reviewloop.errors import ReviewloopError
 from reviewloop.models import Anchor, Command, EventKind, Finding, Severity, Side, ThreadRef, User
+from reviewloop.state import parse_finding_marker
 from reviewloop.vcs.github import GitHubAdapter
 
 FIXTURES = Path(__file__).parents[2] / "fixtures" / "github"
@@ -103,7 +104,7 @@ def test_bot_identity_fallback():
     assert adapter.bot_identity().username == "github-actions[bot]"
 
 
-def _rc(id, user, body, reply_to=None, line=3):
+def _rc(id, user, body, reply_to=None, line=3, side="RIGHT"):
     return NS(
         id=id,
         user=NS(id=1, login=user),
@@ -111,6 +112,7 @@ def _rc(id, user, body, reply_to=None, line=3):
         in_reply_to_id=reply_to,
         path="a.py",
         line=line,
+        side=side,
         created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
 
@@ -436,3 +438,109 @@ def test_pull_request_draft_flag():
     pr.head.ref, pr.base.ref, pr.base.sha = "feat", "main", "b1"
     pr.user = NS(id=7, login="alice")
     assert adapter.pull_request().draft is True
+
+
+def _ic(id, user, body):
+    return NS(id=id, node_id=f"IC_{id}", user=NS(id=1, login=user), body=body)
+
+
+def _gql_comments(nodes, has_next=False):
+    resp = MagicMock()
+    page = {"pageInfo": {"hasNextPage": has_next, "endCursor": "c"}, "nodes": nodes}
+    resp.json.return_value = {"data": {"repository": {"pullRequest": {"comments": page}}}}
+    return resp
+
+
+def test_threads_include_marked_bot_issue_comments():
+    adapter, gh, repo = make("comment_review.json")
+    gh.get_user.return_value = NS(id=1, login="bot")
+    pr = _pull(adapter, repo)
+    pr.get_review_comments.return_value = [_rc(10, "bot", f"old side\n{MARKER}", side="LEFT")]
+    other = MARKER.replace('"f-1"', '"f-2"')
+    pr.get_issue_comments.return_value = [
+        _ic(30, "bot", f"`a.py:1`\n\nsecret\n{other}"),
+        _ic(31, "bot", f"<!-- reviewloop:summary -->\n{STATE}"),
+        _ic(32, "alice", f"copied\n{MARKER}"),
+        _ic(33, "bot", "plain"),
+        _ic(34, "bot", f"hidden\n{other.replace('f-2', 'f-3')}"),
+    ]
+    review = _gql([{"id": "PRRT_1", "isResolved": False, "comments": {"nodes": [{"databaseId": 10}]}}])
+    first = _gql_comments([{"id": "IC_30", "isMinimized": False}], has_next=True)
+    second = _gql_comments([{"id": "IC_34", "isMinimized": True}])
+    with patch("reviewloop.vcs.github.httpx.post", side_effect=[review, first, second]) as post:
+        threads = adapter.threads()
+    assert [t.ref for t in threads] == [
+        ThreadRef(id="PRRT_1", note_id="10"),
+        ThreadRef(id="IC_30", note_id="30"),
+        ThreadRef(id="IC_34", note_id="34"),
+    ]
+    assert threads[0].side is Side.OLD
+    general = threads[1]
+    assert (general.path, general.line, general.resolved, general.replies) == (None, None, False, [])
+    assert general.marker is not None and general.marker.id == "f-2"
+    assert threads[2].resolved
+    # One paged query for all comments, not one call per comment.
+    assert post.call_count == 3 and post.call_args.kwargs["json"]["variables"]["cursor"] == "c"
+
+
+def test_threads_skip_comment_query_without_marked_issue_comments():
+    adapter, gh, repo = make("comment_review.json")
+    gh.get_user.return_value = NS(id=1, login="bot")
+    pr = _pull(adapter, repo)
+    pr.get_review_comments.return_value = []
+    pr.get_issue_comments.return_value = [_ic(31, "bot", "<!-- reviewloop:summary -->")]
+    with patch("reviewloop.vcs.github.httpx.post", return_value=_gql([])) as post:
+        assert adapter.threads() == []
+    assert post.call_count == 1
+
+
+def test_reply_to_issue_comment_thread_links_the_finding():
+    adapter, _, repo = make("comment_review.json")
+    pr = _pull(adapter, repo, html_url="https://github.com/o/r/pull/5")
+    adapter.reply(ThreadRef(id="IC_30", note_id="30"), "Still found.")
+    pr.create_issue_comment.assert_called_once_with("Re: https://github.com/o/r/pull/5#issuecomment-30\n\nStill found.")
+    pr.create_review_comment_reply.assert_not_called()
+
+
+def test_resolve_issue_comment_thread_minimizes_it():
+    adapter = make("comment_review.json")[0]
+    with patch("reviewloop.vcs.github.httpx.post") as post:
+        post.return_value.json.return_value = {"data": {}}
+        adapter.resolve(ThreadRef(id="IC_30", note_id="30"))
+    sent = post.call_args.kwargs["json"]
+    assert post.call_count == 1
+    assert "minimizeComment" in sent["query"] and "classifier: RESOLVED" in sent["query"]
+    assert sent["variables"] == {"id": "IC_30"}
+
+
+def test_forced_secret_finding_posted_then_rechecked_on_github_shape():
+    """A scanner hit goes out with post_general; the next recheck must find it, reply to it and hide it."""
+    adapter, gh, repo = make("comment_review.json")
+    gh.get_user.return_value = NS(id=1, login="bot")
+    pr = _pull(adapter, repo, html_url="https://github.com/o/r/pull/5")
+    posted: list[NS] = []
+
+    def create(body):
+        posted.append(_ic(700 + len(posted), "bot", body))
+        return posted[-1]
+
+    pr.create_issue_comment.side_effect = create
+    pr.get_issue_comments.side_effect = lambda: list(posted)
+    pr.get_review_comments.return_value = []
+    marker = MARKER.replace('"rule":null', '"rule":"gitleaks:github-pat"')
+    ref = adapter.post_general(f"`config.py:3`\n\ngitleaks found a secret.\n\n{marker}")
+
+    with patch("reviewloop.vcs.github.httpx.post") as post:
+        post.side_effect = [_gql([]), _gql_comments([{"id": "IC_700", "isMinimized": False}])]
+        threads = adapter.threads()
+    assert ref.id == "700" and len(threads) == 1
+    found = threads[0]
+    assert found.ref == ThreadRef(id="IC_700", note_id="700") and not found.resolved
+    assert parse_finding_marker(found.body) == found.marker and found.marker.rule == "gitleaks:github-pat"
+
+    adapter.reply(found.ref, "Rotated and removed.")
+    with patch("reviewloop.vcs.github.httpx.post") as post:
+        post.return_value.json.return_value = {"data": {}}
+        adapter.resolve(found.ref)
+    assert posted[-1].body.startswith("Re: https://github.com/o/r/pull/5#issuecomment-700")
+    assert post.call_args.kwargs["json"]["variables"] == {"id": "IC_700"}

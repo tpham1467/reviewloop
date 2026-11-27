@@ -9,9 +9,27 @@ from reviewloop.agents.base import AgentAdapter
 from reviewloop.config import Config
 from reviewloop.diff import FileDiff
 from reviewloop.models import CoverageStatus, Event, FileCoverage, Finding, PullRequest, RunState, Thread
+from reviewloop.skills.schemas import FollowUpVerdict
 from reviewloop.state import parse_state_marker
 from reviewloop.trackers.base import Ticket, TrackerAdapter
 from reviewloop.vcs.base import VcsAdapter
+
+
+@dataclass
+class FollowUp:
+    """One `/reviewloop recheck` turn (spec 5.2); resolve-target-turn sets it when a state marker exists."""
+
+    # The previous head when it is an ancestor of this head; None diffs from the merge-base (force push, ruling R36).
+    diff_base: str | None = None
+    # The state's open ids whose thread still exists and is not resolved; `removed` are those with no thread left.
+    open_ids: list[str] = field(default_factory=list[str])
+    removed: list[str] = field(default_factory=list[str])
+    # Open threads sent to the agent, by finding id.
+    threads: dict[str, Thread] = field(default_factory=dict[str, Thread])
+    # Secret threads the rescan keeps open, by finding id, with the reply that says why (ruling R38).
+    forced: dict[str, str] = field(default_factory=dict[str, str])
+    verdicts: dict[str, FollowUpVerdict] = field(default_factory=dict[str, FollowUpVerdict])
+    resolved: list[str] = field(default_factory=list[str])
 
 
 @dataclass
@@ -46,6 +64,7 @@ class RunContext:
     split_review: bool = False
     overview: str = ""
     posted: list[Finding] = field(default_factory=list[Finding])
+    follow_up: FollowUp | None = None
     log: logging.Logger = field(default_factory=lambda: logging.getLogger("reviewloop.pipeline"))
 
     def __post_init__(self) -> None:

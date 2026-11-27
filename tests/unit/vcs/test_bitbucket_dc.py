@@ -222,6 +222,7 @@ def test_threads_filters_bot_reads_resolved_replies_and_pages() -> None:
     assert len(threads) == 1
     t = threads[0]
     assert t.ref == ThreadRef(id="10", note_id="10") and (t.path, t.line, t.resolved) == ("a.py", 5, True)
+    assert t.side is Side.NEW
     assert [r.body for r in t.replies] == ["why?", "nested"]
     assert t.marker is not None and t.marker.id == "f1"
 
@@ -418,3 +419,10 @@ def test_pull_request_draft_flag(extra: dict[str, Any], draft: bool) -> None:
         **extra,
     }  # fmt: skip
     assert adapter.pull_request().draft is draft
+
+
+def test_threads_old_side_anchor() -> None:
+    adapter, fake = make()
+    old = {"id": 30, "text": "removed line", "author": BOT, "anchor": {"path": "a.py", "line": 2, "fileType": "FROM"}}
+    fake.routes[f"{PR}/activities"] = page([commented(old)])
+    assert [t.side for t in adapter.threads()] == [Side.OLD]

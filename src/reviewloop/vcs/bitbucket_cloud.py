@@ -261,6 +261,7 @@ class BitbucketCloudAdapter:
                     resolved=bool(c.get("resolution")),
                     replies=replies.get(cid, []),
                     marker=marker,
+                    side=Side.OLD if inline.get("to") is None and inline.get("from") is not None else Side.NEW,
                 )
             )
         return result

@@ -243,6 +243,7 @@ class BitbucketDCAdapter:
                         for r in _flatten_replies(comment)
                     ],
                     marker=parse_finding_marker(body),
+                    side=Side.OLD if anchor.get("fileType") == "FROM" else Side.NEW,
                 )
             )
         return result

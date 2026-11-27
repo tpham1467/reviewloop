@@ -1,12 +1,10 @@
 import json
-from collections.abc import Callable
-from pathlib import Path
 
 from reviewloop.anchor import resolve_anchor
 from reviewloop.models import Anchor, Finding, FindingMarker
 from reviewloop.output.redact import redact, safe_text
 from reviewloop.pipeline import prompts
-from reviewloop.pipeline.agent import run_agent, write_input
+from reviewloop.pipeline.agent import Reader, run_agent, sandbox_reader, write_input
 from reviewloop.pipeline.context import RunContext
 from reviewloop.pipeline.engine import StopFlow
 from reviewloop.pipeline.findings import finding_fingerprint, is_forced
@@ -20,21 +18,7 @@ _PLACEMENT = ("path", "line", "side", "existing_code", "cause_code")
 _REPAIR_INPUT = {"path", "line", "side", "severity", "category", "text", "existing_code", "cause_code"}
 ID_HEX = 6
 
-Reader = Callable[[str], str | None]
 Placed = list[tuple[Finding, Anchor | None]]
-
-
-def _reader(sandbox: Path) -> Reader:
-    root = sandbox.resolve()
-
-    def read(path: str) -> str | None:
-        # The sandbox is the PR head with links checked out as plain files, so no read leaves it.
-        target = (root / path).resolve()
-        if not target.is_relative_to(root) or not target.is_file():
-            return None
-        return target.read_text(encoding="utf-8", errors="replace")
-
-    return read
 
 
 def _finding_id(fp: str, taken: set[str]) -> str:
@@ -52,7 +36,7 @@ class PostComment:
     group: str | None = None
 
     def run(self, ctx: RunContext) -> None:
-        read = _reader(ctx.sandbox)
+        read = sandbox_reader(ctx.sandbox)
         placed: Placed = [(f, None if is_forced(f) else resolve_anchor(f, ctx.diffs, read)) for f in ctx.findings]
         lost = [i for i, (f, a) in enumerate(placed) if a is None and not is_forced(f)]
         if lost:

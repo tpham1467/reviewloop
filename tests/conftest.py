@@ -26,6 +26,8 @@ class FakeVcs:
         self.summaries: list[str] = []
         self.inline: list[tuple[Finding, Anchor]] = []
         self.general: list[str] = []
+        self.replies: list[tuple[str, str]] = []
+        self.resolved: list[str] = []
 
     def event(self) -> Event:
         return Event(kind=EventKind.OPENED, pr_number=self.pr.number)
@@ -51,10 +53,10 @@ class FakeVcs:
         return ThreadRef(id=f"g{len(self.general)}")
 
     def reply(self, thread: ThreadRef, body: str) -> None:
-        return None
+        self.replies.append((thread.id, body))
 
     def resolve(self, thread: ThreadRef) -> None:
-        return None
+        self.resolved.append(thread.id)
 
     def upsert_summary(self, body: str) -> None:
         self.summary = body

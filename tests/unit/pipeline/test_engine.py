@@ -180,3 +180,17 @@ def test_base_exception_keeps_original_when_clean_fails(make_ctx) -> None:
     clean = Recorder("clean", FINALLY, fail=OSError("rmtree failed"))
     with pytest.raises(SystemExit):
         run_flow([Recorder("a", fail=SystemExit(3)), clean], ctx)
+
+
+def test_switch_flow_replaces_remaining_steps_and_keeps_finally(make_ctx) -> None:
+    from reviewloop.pipeline.engine import SwitchFlow
+
+    replacement = Recorder("fallback")
+    replacement_clean = Recorder("fallback-clean", FINALLY)
+    skipped = Recorder("skipped")
+    clean = Recorder("clean", FINALLY)
+
+    run_flow([Recorder("switch", fail=SwitchFlow([replacement, replacement_clean])), skipped, clean], make_ctx())
+
+    assert replacement.done.is_set() and clean.done.is_set()
+    assert not skipped.done.is_set() and not replacement_clean.done.is_set()

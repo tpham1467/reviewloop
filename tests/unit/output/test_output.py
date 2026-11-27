@@ -170,3 +170,16 @@ def test_summary_neutralizes_markers_and_collapses_lines() -> None:
 def test_summary_failed_without_error() -> None:
     s = render_summary("o", [], OK, STATE, "failed")
     assert "Review failed: unknown error" in s
+
+
+def test_recheck_summary_shows_thread_counts() -> None:
+    from reviewloop.output.summary import Recheck
+
+    recheck = Recheck(fixed=2, rebutted=1, still_open=3, not_rechecked=["f-abc123", "f-<!--x"], removed=4)
+    s = render_summary("ignored overview", [], OK, STATE, "rechecked", recheck=recheck)
+    assert s.splitlines()[1] == "Re-check complete"
+    for row in ("| fixed | 2 |", "| rebutted | 1 |", "| still open | 3 |", "| not re-checked | 2 |", "| removed | 4 |"):
+        assert row in s
+    assert "Not re-checked: `f-abc123`, `f-&lt;!--x`" in s
+    assert "ignored overview" not in s and "Score:" not in s and "| Severity |" not in s
+    assert parse_state_marker(s) == STATE
