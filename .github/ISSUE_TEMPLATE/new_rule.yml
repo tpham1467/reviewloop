@@ -1,0 +1,31 @@
+name: New review rule
+description: Propose a rule or skill for the reviewer
+labels: [rule]
+body:
+  - type: input
+    id: name
+    attributes:
+      label: Rule name
+    validations:
+      required: true
+  - type: textarea
+    id: bad
+    attributes:
+      label: Code the rule should flag
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: good
+    attributes:
+      label: Code the rule should accept
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it matters
+      description: Link a reference or describe the real-world failure.
+    validations:
+      required: true
