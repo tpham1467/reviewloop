@@ -37,6 +37,8 @@ class Anchor(BaseModel):
     line: int
     side: Side
     in_diff: bool
+    # First line of a multi-line range ending at `line`; None means a single line.
+    start_line: int | None = None
 
 
 class User(BaseModel):
