@@ -5,14 +5,13 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor, wait
 from typing import Protocol
 
-from reviewloop.errors import ReviewloopError
 from reviewloop.models import RunState
 from reviewloop.output.summary import render_notice, render_summary
 from reviewloop.pipeline.context import RunContext
+from reviewloop.pipeline.failures import error_text, failure_reason
 
 # Steps in this group run after the flow ends, whether it succeeded, stopped or failed.
 FINALLY = "finally"
-MAX_REASON = 200
 
 
 class Step(Protocol):
@@ -69,11 +68,6 @@ def _run_batch(batch: list[Step], ctx: RunContext) -> Failure | None:
     return None
 
 
-def _error_text(exc: BaseException) -> str:
-    # Messages of unexpected exceptions may carry internals; ReviewloopError messages are written for users.
-    return str(exc) if isinstance(exc, ReviewloopError) else f"internal error ({type(exc).__name__})"
-
-
 def _write_summary(ctx: RunContext, render: Callable[[RunState], str]) -> None:
     """Write a notice or failure; it keeps the state marker as it is, since this run advanced no turn."""
     current = ctx.current_state()
@@ -84,8 +78,8 @@ def _write_summary(ctx: RunContext, render: Callable[[RunState], str]) -> None:
 
 
 def _report_failure(ctx: RunContext, step: Step, exc: Exception) -> None:
-    error = _error_text(exc)
-    ctx.fail_uncovered(f"{step.id}: {' '.join(error.split())[:MAX_REASON]}")
+    error = error_text(exc)
+    ctx.fail_uncovered(failure_reason(step.id, exc))
     try:
         _write_summary(ctx, lambda state: render_summary(ctx.overview, [], ctx.coverage, state, "failed", error))
     except Exception:

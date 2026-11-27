@@ -1,8 +1,8 @@
 import json
 
-from reviewloop.diff import FileDiff
+from reviewloop.diff import changed_lines
 from reviewloop.models import Thread
-from reviewloop.pipeline.agent import OVERVIEW_SANDBOX, SECURITY_SANDBOX, copy_sandbox, write_input
+from reviewloop.pipeline.agent import OVERVIEW_SANDBOX, SECURITY_SANDBOX, copy_sandbox, write_diff, write_input
 from reviewloop.pipeline.context import RunContext
 from reviewloop.stacks import glob_match, rules_for
 
@@ -11,16 +11,6 @@ SECURITY_SETTING = {
     True: "a separate security step runs; skip the Security section of the code-review skill",
     False: "enabled for the code-review step; apply its Security section",
 }
-_PREFIX = {"add": "+", "del": "-", "ctx": " "}
-
-
-def render_diff(fd: FileDiff) -> str:
-    head = f"--- {fd.old_path or fd.path}\n+++ {fd.path}\n"
-    hunks = [
-        f"@@ -{h.old_start} +{h.new_start} @@\n" + "".join(f"{_PREFIX[ln.kind]}{ln.text}\n" for ln in h.lines)
-        for h in fd.hunks
-    ]
-    return head + "".join(hunks)
 
 
 def _previous(threads: list[Thread]) -> str:
@@ -41,15 +31,7 @@ class BuildContext:
 
     def run(self, ctx: RunContext) -> None:
         pr, cfg = ctx.pr, ctx.config
-        excluded = {c.path: c.reason for c in ctx.excluded}
-        index = ["# Diff index", "", "| File | Status | Input |", "| --- | --- | --- |"]
-        for fd in ctx.diffs:
-            reason = excluded.get(fd.path)
-            where = f"excluded: {reason}" if reason else f"`.reviewloop/diff/files/{fd.path}.diff`"
-            index.append(f"| `{fd.path}` | {fd.status} | {where} |")
-            if reason is None:
-                write_input(ctx.sandbox, f"diff/files/{fd.path}.diff", render_diff(fd))
-        write_input(ctx.sandbox, "diff/index.md", "\n".join(index) + "\n")
+        write_diff(ctx.sandbox, ctx.diffs, {c.path: c.reason for c in ctx.excluded})
 
         context = [
             f"# {pr.title}",
@@ -86,6 +68,8 @@ class BuildContext:
 
         write_input(ctx.sandbox, "previous-findings.json", _previous(ctx.previous_threads))
 
+        # Decided here, before the review group starts, so large-diff-review and initial-review never race on it.
+        ctx.split_review = changed_lines(ctx.reviewable()) > cfg.large_diff_lines
         # Last: the parallel review group's copies must hold every input above.
         if ctx.reviewable():
             copy_sandbox(ctx, OVERVIEW_SANDBOX)

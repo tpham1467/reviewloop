@@ -458,19 +458,6 @@ def test_security_branch_verifies_and_merges(make_ctx, monkeypatch) -> None:
     assert [f.text for f in ctx.findings] == ["Same SQL, found by the main review.", history.text]
 
 
-def test_large_diff_marks_files_too_large(make_ctx) -> None:
-    from reviewloop.pipeline.steps.initial.large_diff_review import LargeDiffReview
-
-    ctx = with_diff(make_ctx())
-    ctx.config = Config(large_diff_lines=2)
-    with pytest.raises(Exception, match="diff too large"):
-        LargeDiffReview().run(ctx)
-    assert {(c.path, c.status, c.reason) for c in ctx.coverage} == {
-        ("app.py", "failed", "too_large"),
-        ("b.py", "failed", "too_large"),
-    }
-
-
 def test_clean_keeps_workdir_on_request(make_ctx) -> None:
     from reviewloop.pipeline.steps.initial.clean import Clean
 

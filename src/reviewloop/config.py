@@ -1,7 +1,7 @@
 from typing import Any, Literal, cast
 
 import yaml
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, PositiveInt, ValidationError
 
 from reviewloop.errors import ConfigError
 
@@ -44,7 +44,7 @@ class Config(_Strict):
     security: SecurityConfig = SecurityConfig()
     suggestions: bool = True
     fail_on: Literal["none", "critical", "high"] = "none"
-    large_diff_lines: int = 3000
+    large_diff_lines: PositiveInt = 3000
     review_drafts: bool = False
 
 

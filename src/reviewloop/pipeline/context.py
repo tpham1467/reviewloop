@@ -42,6 +42,8 @@ class RunContext:
     findings: list[Finding] = field(default_factory=list[Finding])
     security_findings: list[Finding] = field(default_factory=list[Finding])
     coverage: list[FileCoverage] = field(default_factory=list[FileCoverage])
+    # Set by build-context from the threshold: large-diff-review reviews in groups and initial-review returns.
+    split_review: bool = False
     overview: str = ""
     posted: list[Finding] = field(default_factory=list[Finding])
     log: logging.Logger = field(default_factory=lambda: logging.getLogger("reviewloop.pipeline"))

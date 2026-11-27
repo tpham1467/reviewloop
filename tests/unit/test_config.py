@@ -74,3 +74,10 @@ def test_load_config_rejects_bad_value_and_yaml():
 def test_load_config_rejects_secret_like_keys(text):
     with pytest.raises(ConfigError, match="CI variable"):
         load_config(text)
+
+
+@pytest.mark.parametrize("value", [0, -5])
+def test_large_diff_lines_must_be_positive(value: int) -> None:
+    with pytest.raises(ConfigError, match="large_diff_lines"):
+        load_config(f"large_diff_lines: {value}\n")
+    assert load_config("large_diff_lines: 1\n").large_diff_lines == 1

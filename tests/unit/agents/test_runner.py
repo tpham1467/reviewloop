@@ -125,3 +125,22 @@ def test_validation_errors_never_echo_output(fake_agent: str, make_task) -> None
     assert "count: Input should be a valid integer" in str(info.value)
     error_part = adapter.prompts[1].split("<previous_output>")[0]
     assert "ghp_FAKE_LEAK" not in error_part
+
+
+def test_stderr_redacted_before_tail_cut(make_task) -> None:
+    import sys
+
+    from reviewloop.agents.runner import STDERR_TAIL, run_cli
+
+    token = "ghp_" + "A1b2C3d4E5" * 4
+    # The kept tail starts 20 characters before the token's end: cut first, the rest no longer matches a pattern.
+    after = STDERR_TAIL - 21
+    script = f"import sys; sys.stderr.write('x' * 300 + {token!r} + ' ' + 'y' * {after}); sys.exit(1)"
+
+    with pytest.raises(AgentStepError, match="exit code 1") as caught:
+        run_cli(make_task(), [sys.executable, "-c", script], {})
+
+    message = str(caught.value)
+    assert "[redacted]" in message
+    assert "C3d4E5" not in message
+    assert message.endswith("y" * after)
