@@ -371,23 +371,23 @@ def test_manual_review_targets_pr_and_skips_permission_check(ci: Any, monkeypatc
                           pr_number=7)]  # fmt: skip
 
 
-def test_recheck_until_follow_up_exists(ci: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_recheck_runs_follow_up_flow(ci: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     with_event(ci.vcs, Event(kind=EventKind.COMMAND, command=Command.RECHECK, actor=READER, pr_number=7))
-    monkeypatch.setattr(flows, "follow_up_flow", list)
-    for args in (["run"], ["recheck", "--pr", "7"]):
-        result = ci.invoke(*args)
-        assert result.exit_code == 0
-        assert "follow-up not available yet" in result.stderr
-    assert ci.vcs.summaries == [] and ci.vcs.general == []
-
-
-def test_recheck_runs_follow_up_flow(ci: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    with_event(ci.vcs, Event(kind=EventKind.COMMAND, command=Command.RECHECK, actor=READER, pr_number=7))
-    step = Step("follow-up")
-    monkeypatch.setattr(flows, "follow_up_flow", lambda: [step])
+    seen: list[Event] = []
+    steps = [Step("post-follow-up-comments", lambda ctx: seen.append(ctx.event))]
+    monkeypatch.setattr(flows, "follow_up_flow", lambda: steps)
     monkeypatch.setattr(flows, "initial_flow", lambda: pytest.fail("recheck runs the follow-up flow"))
-    assert ci.invoke("run").exit_code == 0
-    assert step.ran
+    for args in (["run"], ["recheck", "--pr", "7"]):
+        assert ci.invoke(*args, "--output-dir", str(tmp_path / "out")).exit_code == 0
+    assert [e.command for e in seen] == [Command.RECHECK, Command.RECHECK]
+    assert (tmp_path / "out" / "reviewloop.json").is_file()
+
+
+def test_follow_up_flow_shares_head_sandbox_step() -> None:
+    from reviewloop.pipeline.steps.initial.init_context import InitContext
+
+    # InitContext clones the sandbox at pr.head_sha (R80) in both flows.
+    assert any(isinstance(s, InitContext) for s in flows.follow_up_flow())
 
 
 def test_workdir_under_runner_temp(ci: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

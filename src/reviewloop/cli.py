@@ -147,10 +147,6 @@ def _dispatch(env: Mapping[str, str], workdir: Path, output_dir: Path, manual: t
         log.info("fork pull request skipped; a user with write access can comment /reviewloop review")
         return 0
     steps = flows.follow_up_flow() if event.command is Command.RECHECK else flows.initial_flow()
-    if not steps:
-        log.info("recheck: follow-up not available yet")
-        return 0
-
     ctx = RunContext(vcs=vcs, pr=pr, event=event, env=env, source_dir=Path.cwd(), workdir=workdir)
     started: set[str] = set()
     try:

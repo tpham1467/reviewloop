@@ -564,6 +564,30 @@ def test_host_git_env_trusts_only_the_checkout(tmp_path, monkeypatch) -> None:
     assert not any(k.startswith("GIT_CONFIG_KEY_") or k == "GIT_CONFIG_COUNT" for k in plain)
 
 
+def test_follow_up_git_calls_trust_the_checkout(tmp_path, monkeypatch) -> None:
+    """Lineage git calls (run_git) and the follow-up history rescan (scan_history) use the trusted host env (R83)."""
+    import subprocess
+
+    from reviewloop.pipeline import git
+    from reviewloop.security import scanners
+
+    envs: list[dict[str, str]] = []
+
+    def spy(cmd, **kw):
+        envs.append(kw["env"])
+        return subprocess.CompletedProcess(cmd, 1, b"", b"")
+
+    monkeypatch.setattr(git.subprocess, "run", spy)
+    git.run_git(tmp_path, "merge-base", "--is-ancestor", "a" * 40, "b" * 40)
+    monkeypatch.setattr(scanners.shutil, "which", lambda n: "/bin/gitleaks")
+    monkeypatch.setattr(scanners.subprocess, "run", spy)
+    scanners.scan_history(tmp_path, "a" * 40, "b" * 40)
+
+    assert [(e["GIT_CONFIG_KEY_0"], e["GIT_CONFIG_VALUE_0"]) for e in envs] == [
+        ("safe.directory", str(tmp_path.resolve()))
+    ] * 2
+
+
 def test_host_git_trust_reaches_checkout_calls_not_sandbox(make_ctx, pr_repo, monkeypatch) -> None:
     import subprocess
 
