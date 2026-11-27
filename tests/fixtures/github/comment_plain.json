@@ -1,0 +1,17 @@
+{
+  "action": "created",
+  "issue": {
+    "number": 5,
+    "pull_request": {
+      "url": "x"
+    }
+  },
+  "comment": {
+    "body": "looks good",
+    "user": {
+      "id": 7,
+      "login": "alice"
+    },
+    "author_association": "OWNER"
+  }
+}

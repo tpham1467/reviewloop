@@ -1,0 +1,14 @@
+{
+  "action": "created",
+  "issue": {
+    "number": 5
+  },
+  "comment": {
+    "body": "/reviewloop review",
+    "user": {
+      "id": 7,
+      "login": "alice"
+    },
+    "author_association": "OWNER"
+  }
+}
