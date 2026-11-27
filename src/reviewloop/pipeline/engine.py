@@ -74,6 +74,11 @@ def _error_text(exc: BaseException) -> str:
     return str(exc) if isinstance(exc, ReviewloopError) else f"internal error ({type(exc).__name__})"
 
 
+def failure_reason(where: str, exc: BaseException) -> str:
+    """The one-line coverage reason for files that failed because `where` raised `exc`."""
+    return f"{where}: {' '.join(_error_text(exc).split())[:MAX_REASON]}"
+
+
 def _write_summary(ctx: RunContext, render: Callable[[RunState], str]) -> None:
     """Write a notice or failure; it keeps the state marker as it is, since this run advanced no turn."""
     current = ctx.current_state()
@@ -85,7 +90,7 @@ def _write_summary(ctx: RunContext, render: Callable[[RunState], str]) -> None:
 
 def _report_failure(ctx: RunContext, step: Step, exc: Exception) -> None:
     error = _error_text(exc)
-    ctx.fail_uncovered(f"{step.id}: {' '.join(error.split())[:MAX_REASON]}")
+    ctx.fail_uncovered(failure_reason(step.id, exc))
     try:
         _write_summary(ctx, lambda state: render_summary(ctx.overview, [], ctx.coverage, state, "failed", error))
     except Exception:

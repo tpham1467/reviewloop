@@ -1,4 +1,6 @@
 import json
+from collections.abc import Mapping
+from pathlib import Path
 
 from reviewloop.diff import FileDiff
 from reviewloop.models import Thread
@@ -33,6 +35,18 @@ def _previous(threads: list[Thread]) -> str:
     return json.dumps(items, indent=2)
 
 
+def write_diff(sandbox: Path, diffs: list[FileDiff], excluded: Mapping[str, str | None]) -> None:
+    """The diff index and one diff file per file not in `excluded` (path to reason) under `.reviewloop/diff/`."""
+    index = ["# Diff index", "", "| File | Status | Input |", "| --- | --- | --- |"]
+    for fd in diffs:
+        reason = excluded.get(fd.path)
+        where = f"excluded: {reason}" if reason else f"`.reviewloop/diff/files/{fd.path}.diff`"
+        index.append(f"| `{fd.path}` | {fd.status} | {where} |")
+        if reason is None:
+            write_input(sandbox, f"diff/files/{fd.path}.diff", render_diff(fd))
+    write_input(sandbox, "diff/index.md", "\n".join(index) + "\n")
+
+
 class BuildContext:
     """Write the diff, PR context, rules and previous findings to `.reviewloop/` for the agents."""
 
@@ -41,15 +55,7 @@ class BuildContext:
 
     def run(self, ctx: RunContext) -> None:
         pr, cfg = ctx.pr, ctx.config
-        excluded = {c.path: c.reason for c in ctx.excluded}
-        index = ["# Diff index", "", "| File | Status | Input |", "| --- | --- | --- |"]
-        for fd in ctx.diffs:
-            reason = excluded.get(fd.path)
-            where = f"excluded: {reason}" if reason else f"`.reviewloop/diff/files/{fd.path}.diff`"
-            index.append(f"| `{fd.path}` | {fd.status} | {where} |")
-            if reason is None:
-                write_input(ctx.sandbox, f"diff/files/{fd.path}.diff", render_diff(fd))
-        write_input(ctx.sandbox, "diff/index.md", "\n".join(index) + "\n")
+        write_diff(ctx.sandbox, ctx.diffs, {c.path: c.reason for c in ctx.excluded})
 
         context = [
             f"# {pr.title}",

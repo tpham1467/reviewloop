@@ -37,11 +37,19 @@ def numbered(findings: list[Finding]) -> str:
 
 
 def run_agent(
-    ctx: RunContext, step: str, skills: list[str], prompt: str, schema: type[_O], sandbox: Path | None = None
+    ctx: RunContext,
+    step: str,
+    skills: list[str],
+    prompt: str,
+    schema: type[_O],
+    sandbox: Path | None = None,
+    lines: int | None = None,
 ) -> _O:
+    """One agent call; the timeout scales with `lines` changed lines, by default the whole reviewable diff."""
     if ctx.agent is None:
         raise AgentStepError(f"step '{step}': no agent configured")
-    timeout = min(BASE_TIMEOUT_S + 2 * changed_lines(ctx.reviewable()), MAX_TIMEOUT_S)
+    size = changed_lines(ctx.reviewable()) if lines is None else lines
+    timeout = min(BASE_TIMEOUT_S + 2 * size, MAX_TIMEOUT_S)
     task = AgentTask(
         step=step,
         prompt=prompt,
