@@ -74,4 +74,4 @@ testpaths = ["tests"]
 addopts = "--import-mode=importlib --cov=reviewloop --cov-report=term-missing"
 
 [tool.coverage.report]
-fail_under = 0
+fail_under = 85
