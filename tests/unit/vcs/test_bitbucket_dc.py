@@ -392,3 +392,29 @@ def test_posted_text_has_no_4byte_chars() -> None:
     assert len(texts) == 6
     for text in texts:
         assert all(ord(ch) <= 0xFFFF for ch in text) and "�" in text
+
+
+def test_summary_body_returns_bot_comment_only() -> None:
+    adapter, fake = make()
+    fake.routes[f"{PR}/activities"] = page([commented({"id": 1, "text": SUMMARY_MARKER, "author": ALICE})])
+    assert adapter.summary_body() is None
+    fake.routes[f"{PR}/activities"] = page(
+        [
+            commented({"id": 1, "text": SUMMARY_MARKER, "author": ALICE}),
+            commented({"id": 2, "text": f"done\n{SUMMARY_MARKER}", "author": BOT}),
+        ]
+    )
+    assert adapter.summary_body() == f"done\n{SUMMARY_MARKER}"
+
+
+@pytest.mark.parametrize(("extra", "draft"), [({"draft": True}, True), ({}, False)])
+def test_pull_request_draft_flag(extra: dict[str, Any], draft: bool) -> None:
+    adapter, fake = make()
+    fake.routes[PR] = {
+        "id": 7, "title": "T",
+        "fromRef": {"displayId": "f", "latestCommit": "h", "repository": {"id": 1}},
+        "toRef": {"displayId": "m", "latestCommit": "b", "repository": {"id": 1}},
+        "author": {"user": ALICE},
+        **extra,
+    }  # fmt: skip
+    assert adapter.pull_request().draft is draft

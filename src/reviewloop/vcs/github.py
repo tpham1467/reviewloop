@@ -151,6 +151,7 @@ class GitHubAdapter:
             author=User(id=str(pr.user.id), username=pr.user.login),
             is_fork=is_fork,
             web_url=pr.html_url,
+            draft=bool(pr.draft),
         )
 
     def bot_identity(self) -> User:
@@ -297,18 +298,27 @@ class GitHubAdapter:
             node_id = found[0]
         self._graphql(_RESOLVE_MUTATION, {"id": node_id})
 
-    def upsert_summary(self, body: str) -> None:
-        pr = self._pull()
+    def _summary_comment(self) -> Any:
         bot = self.bot_identity().username
-        if SUMMARY_MARKER not in body and parse_state_marker(body) is None:
-            body = f"{body}\n{SUMMARY_MARKER}"
-        for comment in pr.get_issue_comments():
+        for comment in self._pull().get_issue_comments():
             if comment.user.login == bot and (
                 SUMMARY_MARKER in comment.body or parse_state_marker(comment.body) is not None
             ):
-                comment.edit(body)
-                return
-        pr.create_issue_comment(body)
+                return comment
+        return None
+
+    def upsert_summary(self, body: str) -> None:
+        if SUMMARY_MARKER not in body and parse_state_marker(body) is None:
+            body = f"{body}\n{SUMMARY_MARKER}"
+        comment = self._summary_comment()
+        if comment is None:
+            self._pull().create_issue_comment(body)
+        else:
+            comment.edit(body)
+
+    def summary_body(self) -> str | None:
+        comment = self._summary_comment()
+        return None if comment is None else str(comment.body)
 
     def suggestion_block(self, anchor: Anchor, code: str, replaced_lines: int = 1) -> str | None:
         if anchor.side == Side.OLD or not anchor.in_diff or replaced_lines > _MAX_SUGGESTION_LINES:

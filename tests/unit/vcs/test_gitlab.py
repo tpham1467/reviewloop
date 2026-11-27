@@ -383,3 +383,19 @@ def test_suggestion_block_clamps_replaced_lines() -> None:
     adapter, _, _ = make(MR_ENV)
     anchor = Anchor(path="a", line=1, side=Side.NEW, in_diff=True)
     assert adapter.suggestion_block(anchor, "x", replaced_lines=0) == "```suggestion:-0+0\nx\n```"
+
+
+def test_summary_body_returns_bot_note_only() -> None:
+    adapter, mr, _ = make(MR_ENV)
+    mr.notes.list.return_value = [SimpleNamespace(body=SUMMARY_MARKER, author={"id": 7, "username": "alice"})]
+    assert adapter.summary_body() is None
+    mr.notes.list.return_value.append(SimpleNamespace(body=f"done\n{SUMMARY_MARKER}", author=BOT))
+    assert adapter.summary_body() == f"done\n{SUMMARY_MARKER}"
+
+
+@pytest.mark.parametrize(
+    ("draft", "wip", "expected"), [(True, False, True), (False, True, True), (False, False, False)]
+)
+def test_pull_request_draft_flag(draft: bool, wip: bool, expected: bool) -> None:
+    adapter, _, _ = make(MR_ENV, {"draft": draft, "work_in_progress": wip})
+    assert adapter.pull_request().draft is expected

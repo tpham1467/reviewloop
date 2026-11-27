@@ -57,6 +57,7 @@ class PullRequest(BaseModel):
     author: User
     is_fork: bool
     web_url: str
+    draft: bool = False
 
 
 class ThreadRef(BaseModel):

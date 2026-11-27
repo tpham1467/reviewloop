@@ -421,3 +421,19 @@ def test_read_file_network_error_message() -> None:
     client.get.side_effect = RequestsConnectionError("down")
     with pytest.raises(ReviewloopError, match="network error"):
         adapter.read_file("x", "main")
+
+
+def test_summary_body_returns_bot_comment_only() -> None:
+    adapter, _ = make(PR_ENV, [comment(1, ALICE, SUMMARY_MARKER)])
+    assert adapter.summary_body() is None
+    adapter, _ = make(PR_ENV, [comment(1, ALICE, SUMMARY_MARKER), comment(2, BOT, f"done\n{SUMMARY_MARKER}")])
+    assert adapter.summary_body() == f"done\n{SUMMARY_MARKER}"
+
+
+def test_pull_request_draft_flag() -> None:
+    adapter, client = make(PR_ENV)
+    assert adapter.pull_request().draft is False
+    raw = client.get.side_effect(f"{REPO}/pullrequests/42")
+    raw["draft"] = True
+    adapter._pr = None
+    assert adapter.pull_request().draft is True

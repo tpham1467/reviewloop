@@ -416,3 +416,23 @@ def test_post_inline_422_fallback_cites_range_without_suggestion():
     assert sent.startswith("`a.py:9-10`")
     assert "```suggestion" not in sent
     assert sent.endswith("body")
+
+
+def test_summary_body_returns_bot_summary_only():
+    adapter, gh, repo = make("comment_review.json")
+    gh.get_user.return_value = NS(id=1, login="bot")
+    pr = _pull(adapter, repo)
+    other = MagicMock(user=NS(login="alice"), body=STATE)
+    mine = MagicMock(user=NS(login="bot"), body=f"done\n{STATE}")
+    pr.get_issue_comments.return_value = [other]
+    assert adapter.summary_body() is None
+    pr.get_issue_comments.return_value = [other, mine]
+    assert adapter.summary_body() == f"done\n{STATE}"
+
+
+def test_pull_request_draft_flag():
+    adapter, _, repo = make("comment_review.json")
+    pr = _pull(adapter, repo, title="t", body="b", html_url="u", draft=True)
+    pr.head.ref, pr.base.ref, pr.base.sha = "feat", "main", "b1"
+    pr.user = NS(id=7, login="alice")
+    assert adapter.pull_request().draft is True
