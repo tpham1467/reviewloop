@@ -1,0 +1,23 @@
+# Bitbucket Cloud: review every pull request, plus a manual pipeline for commands.
+# Set REVIEWLOOP_BITBUCKET_TOKEN (access token) and your agent credential as
+# secured repository variables.
+image: ghcr.io/tpham1467/reviewloop:0
+
+pipelines:
+  pull-requests:
+    '**':
+      - step:
+          name: reviewloop
+          script:
+            - reviewloop run
+  custom:
+    reviewloop-command:
+      - variables:
+          - name: PR_ID
+          - name: COMMAND
+            default: recheck
+            allowed-values: [review, recheck, help]
+      - step:
+          name: reviewloop command
+          script:
+            - reviewloop run
