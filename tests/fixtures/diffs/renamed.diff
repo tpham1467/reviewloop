@@ -1,0 +1,13 @@
+diff --git a/pkg/old_name.py b/pkg/new_name.py
+similarity index 75%
+rename from pkg/old_name.py
+rename to pkg/new_name.py
+index 1111111..2222222 100644
+--- a/pkg/old_name.py
++++ b/pkg/new_name.py
+@@ -1,4 +1,4 @@
+ import os
+-def load(path):
++def load(path, mode="r"):
+     return open(path)
+ # tail
