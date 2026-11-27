@@ -1,7 +1,7 @@
 import json
 import re
 
-from reviewloop.models import Reply, Thread, User
+from reviewloop.models import Reply, Side, Thread, User
 from reviewloop.pipeline.agent import Reader, sandbox_reader, write_input
 from reviewloop.pipeline.context import RunContext
 
@@ -16,14 +16,17 @@ def _reply(r: Reply) -> dict[str, str]:
 
 
 def _code_at_anchor(thread: Thread, read: Reader) -> dict[str, object] | None:
-    """The head file around the anchor, numbered, so the agent sees the code as it is now."""
-    if thread.path is None:
+    """The head file around the anchor, numbered, so the agent sees the code as it is now.
+
+    None when there is no anchor, or when it is on the old side: that line number counts base lines, not head lines.
+    """
+    if thread.path is None or thread.line is None or thread.side is Side.OLD:
         return None
     text = read(thread.path)
     if text is None:
         return {"path": thread.path, "status": "missing at head"}
     lines = text.splitlines()
-    line = thread.line or 1
+    line = thread.line
     start = max(line - CONTEXT_LINES, 1)
     end = min(line + CONTEXT_LINES, len(lines))
     numbered = "\n".join(f"{n}: {lines[n - 1]}" for n in range(start, end + 1))
@@ -60,16 +63,16 @@ class LoadThreadInputs:
         assert ctx.previous_state is not None and ctx.follow_up is not None  # noqa: S101 - set by resolve-target-turn
         follow = ctx.follow_up
         listed = set(ctx.previous_state.open)
-        ctx.previous_threads = [t for t in ctx.vcs.threads() if t.marker is not None]
-        by_id = {t.marker.id: t for t in ctx.previous_threads if t.marker is not None and t.marker.id in listed}
-        # A thread resolved by hand since the last turn is no longer open.
-        follow.open_ids = [i for i in ctx.previous_state.open if not (i in by_id and by_id[i].resolved)]
+        by_id = {t.marker.id: t for t in ctx.vcs.threads() if t.marker is not None and t.marker.id in listed}
+        # A thread deleted on the platform can never be re-checked, and one resolved by hand is no longer open.
+        follow.removed = [i for i in ctx.previous_state.open if i not in by_id]
+        if follow.removed:
+            ctx.log.info("open findings with no thread left, dropped: %s", ", ".join(follow.removed))
+        follow.open_ids = [i for i in ctx.previous_state.open if i in by_id and not by_id[i].resolved]
         bot = ctx.vcs.bot_identity()
         read = sandbox_reader(ctx.sandbox)
         for fid in follow.open_ids:
-            thread = by_id.get(fid)
-            if thread is None:
-                continue
+            thread = by_id[fid]
             if not _FINDING_ID.fullmatch(fid):
                 ctx.log.warning("finding id %r is not a reviewloop id; thread not re-checked", fid)
                 continue

@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 
 from reviewloop.agents.base import AgentTask
-from reviewloop.models import EventKind, FindingMarker, Reply, RunState, Severity, Thread, ThreadRef, User
+from reviewloop.models import EventKind, FindingMarker, Reply, RunState, Severity, Side, Thread, ThreadRef, User
+from reviewloop.output.redact import safe_text
 from reviewloop.output.summary import render_notice
 from reviewloop.pipeline.engine import run_flow
 from reviewloop.pipeline.flows import follow_up_flow
@@ -28,7 +29,7 @@ FAKE_TOKEN = "ghp_" + "F" * 36  # built at runtime so no token-shaped literal is
 
 
 def thread(fid: str, ref: str, *, line: int = 3, path: str | None = "app.py", rule: str | None = None,
-           replies: list[Reply] | None = None, resolved: bool = False) -> Thread:  # fmt: skip
+           replies: list[Reply] | None = None, resolved: bool = False, side: Side = Side.NEW) -> Thread:  # fmt: skip
     marker = FindingMarker(v=1, id=fid, fp=fid * 4, sev=Severity.HIGH, rule=rule)
     return Thread(
         ref=ThreadRef(id=ref, note_id=f"n-{ref}"),
@@ -38,6 +39,7 @@ def thread(fid: str, ref: str, *, line: int = 3, path: str | None = "app.py", ru
         resolved=resolved,
         replies=replies or [],
         marker=marker,
+        side=side,
     )
 
 
@@ -67,6 +69,10 @@ def recheck_ctx(make_ctx, repo: Path, base: str, head: str, prev: str, open_ids:
     return ctx
 
 
+FIXED_REPLY = "`load` now returns None when `db.get` finds no row."
+REBUT_REPLY = "Callers in `views.py` check ownership before `save`. <!-- not a marker -->"
+
+
 def test_recheck_resolves_fixed_and_rebutted(make_ctx, follow_repo) -> None:
     repo, base, prev, head = follow_repo
     rebut = thread("f-bbbbbb", "t2", line=7, replies=[reply("Every caller of `save` checks ownership in `views.py`.")])
@@ -82,8 +88,7 @@ def test_recheck_resolves_fixed_and_rebutted(make_ctx, follow_repo) -> None:
         folder = task.workdir / ".reviewloop" / "follow-up"
         seen.update({p.stem: json.loads(p.read_text()) for p in folder.glob("*.json")})
         assert "Every caller" not in task.prompt and ".reviewloop/follow-up/" in task.prompt
-        return verdicts(("f-aaaaaa", "fixed", "`load` now returns None when `db.get` finds no row."),
-                        ("f-bbbbbb", "valid_rebuttal", "Callers in `views.py` check ownership before `save`."),
+        return verdicts(("f-aaaaaa", "fixed", FIXED_REPLY), ("f-bbbbbb", "valid_rebuttal", REBUT_REPLY),
                         ("f-zzzzzz", "fixed", "Not a thread that was sent."))  # fmt: skip
 
     ctx = recheck_ctx(make_ctx, repo, base, head, prev, ["f-aaaaaa", "f-bbbbbb", "f-dddddd"],
@@ -99,12 +104,14 @@ def test_recheck_resolves_fixed_and_rebutted(make_ctx, follow_repo) -> None:
     assert first["replies"] == [] and first["reviewloop_replies"][0]["body"] == "Earlier note from the bot."
     assert "return row.name if row else None" in first["code_at_anchor"]["text"]
     assert seen["f-bbbbbb"]["replies"][0]["author"] == "alice"
-    assert [t for t, _ in vcs.replies] == ["t1", "t2"]
+    assert vcs.replies == [("t1", safe_text(FIXED_REPLY)), ("t2", safe_text(REBUT_REPLY))]
+    assert "<!--" not in vcs.replies[1][1]
     assert vcs.resolved == ["t1", "t2"]
     state = parse_state_marker(vcs.summary)
     assert state == RunState(v=1, sha=head, base=base, turn=2, open=[])
     assert "Re-check complete" in vcs.summary
     assert "| fixed | 1 |" in vcs.summary and "| rebutted | 1 |" in vcs.summary
+    assert "| removed | 0 |" in vcs.summary
     assert ctx.agent.steps() == ["follow-up-review"]
     assert not Path(ctx.workdir).exists()
 
@@ -282,6 +289,7 @@ def test_recheck_stops_when_overtaken(make_ctx, follow_repo) -> None:
     assert parse_state_marker(ctx.vcs.summary) == newer
 
 
+# "e" * 40 is a well-formed SHA the checkout does not have: a force push or a shallow clone.
 @pytest.mark.parametrize("previous", ["not-a-sha", "e" * 40])
 def test_unusable_previous_head_diffs_from_merge_base(make_ctx, follow_repo, previous: str) -> None:
     from reviewloop.pipeline.steps.follow_up.force_push_and_lineage import ForcePushAndLineage
@@ -294,17 +302,33 @@ def test_unusable_previous_head_diffs_from_merge_base(make_ctx, follow_repo, pre
     assert ctx.follow_up is not None and ctx.follow_up.diff_base is None
 
 
-def test_lineage_git_failure_is_an_error(make_ctx, follow_repo, tmp_path: Path) -> None:
+def test_lineage_ignores_translated_git_messages(make_ctx, pr_repo, run_git, monkeypatch) -> None:
+    from reviewloop.pipeline.steps.follow_up.force_push_and_lineage import ForcePushAndLineage
+    from reviewloop.pipeline.steps.follow_up.resolve_target_turn import ResolveTargetTurn
+
+    # A non-English git must not change the outcome: the previous head exists but is not an ancestor.
+    monkeypatch.setenv("LANGUAGE", "de")
+    monkeypatch.setenv("LC_ALL", "de_DE.UTF-8")
+    repo, base, prev = pr_repo
+    run_git(repo, "reset", "-q", "--hard", base)
+    (repo / "app.py").write_text(FIXED_APP)
+    run_git(repo, "commit", "-q", "-am", "rewritten")
+    ctx = recheck_ctx(make_ctx, repo, base, run_git(repo, "rev-parse", "HEAD"), prev, [])
+    ResolveTargetTurn([]).run(ctx)
+    ForcePushAndLineage().run(ctx)
+    assert ctx.follow_up is not None and ctx.follow_up.diff_base is None
+
+
+def test_lineage_git_failure_names_the_fetch(make_ctx, follow_repo) -> None:
     from reviewloop.errors import ReviewloopError
     from reviewloop.pipeline.steps.follow_up.force_push_and_lineage import ForcePushAndLineage
     from reviewloop.pipeline.steps.follow_up.resolve_target_turn import ResolveTargetTurn
 
-    _repo, base, prev, head = follow_repo
-    not_a_repo = tmp_path / "empty"
-    not_a_repo.mkdir()
-    ctx = recheck_ctx(make_ctx, not_a_repo, base, head, prev, [])
+    # The previous head is present, but the PR head is not: --is-ancestor fails with neither 0 nor 1.
+    repo, base, prev, _head = follow_repo
+    ctx = recheck_ctx(make_ctx, repo, base, "e" * 40, prev, [])
     ResolveTargetTurn([]).run(ctx)
-    with pytest.raises(ReviewloopError, match="merge-base"):
+    with pytest.raises(ReviewloopError, match="git fetch --no-tags origin main"):
         ForcePushAndLineage().run(ctx)
 
 
@@ -314,9 +338,11 @@ def test_thread_input_code_at_anchor_edge_cases(make_ctx, follow_repo) -> None:
     from reviewloop.pipeline.steps.follow_up.resolve_target_turn import ResolveTargetTurn
 
     repo, base, prev, head = follow_repo
-    ctx = recheck_ctx(make_ctx, repo, base, head, prev, ["f-aaaaaa", "f-bbbbbb", "f-cccccc"])
+    ids = ["f-aaaaaa", "f-bbbbbb", "f-cccccc", "f-dddddd"]
+    ctx = recheck_ctx(make_ctx, repo, base, head, prev, ids)
     ctx.vcs.thread_list = [thread("f-aaaaaa", "t1", path=None), thread("f-bbbbbb", "t2", path="gone.py"),
-                           thread("f-cccccc", "t3", path="../outside.py")]  # fmt: skip
+                           thread("f-cccccc", "t3", path="../outside.py"),
+                           thread("f-dddddd", "t4", side=Side.OLD)]  # fmt: skip
     prepare_sandbox(repo, ctx.sandbox)
     ResolveTargetTurn([]).run(ctx)
     LoadThreadInputs().run(ctx)
@@ -326,3 +352,20 @@ def test_thread_input_code_at_anchor_edge_cases(make_ctx, follow_repo) -> None:
     assert read["f-aaaaaa"]["code_at_anchor"] is None
     assert read["f-bbbbbb"]["code_at_anchor"] == {"path": "gone.py", "status": "missing at head"}
     assert read["f-cccccc"]["code_at_anchor"]["status"] == "missing at head"
+    # An old-side line numbers the base file; the head file at that number would be the wrong code.
+    assert read["f-dddddd"]["code_at_anchor"] is None
+
+
+def test_deleted_thread_is_dropped_and_counted(make_ctx, follow_repo, caplog) -> None:
+    repo, base, prev, head = follow_repo
+    out = verdicts(("f-aaaaaa", "not_fixed", "Still returns `row.name`."))
+    ctx = recheck_ctx(make_ctx, repo, base, head, prev, ["f-aaaaaa", "f-9e9e9e"], {"follow-up-review": out})
+    ctx.vcs.thread_list = [thread("f-aaaaaa", "t1")]
+
+    with caplog.at_level("INFO"):
+        run_flow(follow_up_flow(), ctx)
+
+    state = parse_state_marker(ctx.vcs.summary)
+    assert state is not None and state.open == ["f-aaaaaa"]
+    assert "| removed | 1 |" in ctx.vcs.summary and "| not re-checked | 0 |" in ctx.vcs.summary
+    assert "f-9e9e9e" in caplog.text

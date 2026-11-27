@@ -30,6 +30,8 @@ class Recheck:
     still_open: int = 0
     # Open finding ids whose thread got no verdict this turn.
     not_rechecked: list[str] = field(default_factory=list[str])
+    # Open finding ids whose thread no longer exists on the platform; dropped from the open list.
+    removed: int = 0
 
 
 def _any_failed(coverage: list[FileCoverage]) -> bool:
@@ -77,7 +79,7 @@ def render_summary(
     else:
         lines += ["| Re-check | Threads |", "| --- | --- |", f"| fixed | {recheck.fixed} |",
                   f"| rebutted | {recheck.rebutted} |", f"| still open | {recheck.still_open} |",
-                  f"| not re-checked | {len(recheck.not_rechecked)} |"]  # fmt: skip
+                  f"| not re-checked | {len(recheck.not_rechecked)} |", f"| removed | {recheck.removed} |"]  # fmt: skip
         if recheck.not_rechecked:
             ids = ", ".join(f"`{_clean(i, one_line=True)}`" for i in recheck.not_rechecked)
             lines += ["", f"Not re-checked: {ids}"]

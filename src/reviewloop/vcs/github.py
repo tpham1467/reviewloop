@@ -47,6 +47,27 @@ mutation($id: ID!) {
   resolveReviewThread(input: {threadId: $id}) { thread { id isResolved } }
 }
 """
+# PR conversation (issue) comments: a finding posted with `post_general` lives here, and it is "resolved" by hiding it.
+_ISSUE_COMMENTS_QUERY = """
+query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      comments(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { id isMinimized }
+      }
+    }
+  }
+}
+"""
+_MINIMIZE_MUTATION = """
+mutation($id: ID!) {
+  minimizeComment(input: {subjectId: $id, classifier: RESOLVED}) { minimizedComment { isMinimized } }
+}
+"""
+# GraphQL node id prefixes: `IC_` an issue comment, `PRRT_` a review thread.
+_ISSUE_COMMENT_PREFIX = "IC_"
+_REVIEW_THREAD_PREFIX = "PRRT_"
 
 
 class GitHubAdapter:
@@ -201,24 +222,53 @@ class GitHubAdapter:
             raise ReviewloopError("GitHub GraphQL returned errors or no data")
         return cast("dict[str, Any]", payload["data"])
 
-    def _thread_states(self) -> dict[str, tuple[str, bool]]:
-        """Map root review comment id to (GraphQL thread id, resolved)."""
+    def _pr_nodes(self, query: str, connection: str) -> list[dict[str, Any]]:
+        """Every node of one paged connection (`reviewThreads`, `comments`) of this pull request."""
         owner, name = self._repo_name.split("/", 1)
-        states: dict[str, tuple[str, bool]] = {}
+        nodes: list[dict[str, Any]] = []
         cursor: str | None = None
         while True:
-            data = self._graphql(
-                _THREADS_QUERY,
-                {"owner": owner, "name": name, "number": self._pr_number(), "cursor": cursor},
+            data = self._graphql(query, {"owner": owner, "name": name, "number": self._pr_number(), "cursor": cursor})
+            page = data["repository"]["pullRequest"][connection]
+            nodes += page["nodes"]
+            if not page["pageInfo"]["hasNextPage"]:
+                return nodes
+            cursor = page["pageInfo"]["endCursor"]
+
+    def _thread_states(self) -> dict[str, tuple[str, bool]]:
+        """Map root review comment id to (GraphQL thread id, resolved)."""
+        return {
+            str(node["comments"]["nodes"][0]["databaseId"]): (node["id"], node["isResolved"])
+            for node in self._pr_nodes(_THREADS_QUERY, "reviewThreads")
+            if node["comments"]["nodes"]
+        }
+
+    def _general_threads(self, bot: str) -> list[Thread]:
+        """Bot issue comments that carry a finding marker (scanner hits, inline fallbacks); hidden means resolved."""
+        found = [
+            c
+            for c in self._pull().get_issue_comments()
+            if c.user.login == bot
+            and parse_finding_marker(c.body) is not None
+            and SUMMARY_MARKER not in c.body
+            and parse_state_marker(c.body) is None
+        ]
+        if not found:
+            return []
+        hidden = {n["id"]: bool(n["isMinimized"]) for n in self._pr_nodes(_ISSUE_COMMENTS_QUERY, "comments")}
+        return [
+            Thread(
+                # note_id keeps the REST id: a reply links to the comment without another lookup.
+                ref=ThreadRef(id=c.node_id, note_id=str(c.id)),
+                path=None,
+                line=None,
+                body=c.body,
+                resolved=hidden.get(c.node_id, False),
+                replies=[],
+                marker=parse_finding_marker(c.body),
             )
-            threads = data["repository"]["pullRequest"]["reviewThreads"]
-            for node in threads["nodes"]:
-                comments = node["comments"]["nodes"]
-                if comments:
-                    states[str(comments[0]["databaseId"])] = (node["id"], node["isResolved"])
-            if not threads["pageInfo"]["hasNextPage"]:
-                return states
-            cursor = threads["pageInfo"]["endCursor"]
+            for c in found
+        ]
 
     def threads(self) -> list[Thread]:
         bot = self.bot_identity().username
@@ -249,9 +299,10 @@ class GitHubAdapter:
                         for r in replies.get(root.id, [])
                     ],
                     marker=parse_finding_marker(root.body),
+                    side=Side.OLD if root.side == "LEFT" else Side.NEW,
                 )
             )
-        return result
+        return result + self._general_threads(bot)
 
     def post_inline(self, finding: Finding, anchor: Anchor) -> ThreadRef:
         pr = self._pull()
@@ -287,11 +338,19 @@ class GitHubAdapter:
     def reply(self, thread: ThreadRef, body: str) -> None:
         if thread.note_id is None:
             raise ReviewloopError("thread has no root comment id to reply to")
-        self._pull().create_review_comment_reply(int(thread.note_id), body)
+        pr = self._pull()
+        if thread.id.startswith(_ISSUE_COMMENT_PREFIX):
+            # Issue comments have no replies; a new comment opens with a link to the finding it answers.
+            pr.create_issue_comment(f"Re: {pr.html_url}#issuecomment-{int(thread.note_id)}\n\n{body}")
+            return
+        pr.create_review_comment_reply(int(thread.note_id), body)
 
     def resolve(self, thread: ThreadRef) -> None:
         node_id = thread.id
-        if not node_id.startswith("PRRT_"):
+        if node_id.startswith(_ISSUE_COMMENT_PREFIX):
+            self._graphql(_MINIMIZE_MUTATION, {"id": node_id})
+            return
+        if not node_id.startswith(_REVIEW_THREAD_PREFIX):
             found = self._thread_states().get(thread.note_id or thread.id)
             if found is None:
                 raise ReviewloopError(f"review thread {thread.id} not found")

@@ -21,8 +21,9 @@ class FollowUp:
 
     # The previous head when it is an ancestor of this head; None diffs from the merge-base (force push, ruling R36).
     diff_base: str | None = None
-    # The state's open ids, less those whose thread was resolved by hand since the last turn.
+    # The state's open ids whose thread still exists and is not resolved; `removed` are those with no thread left.
     open_ids: list[str] = field(default_factory=list[str])
+    removed: list[str] = field(default_factory=list[str])
     # Open threads sent to the agent, by finding id.
     threads: dict[str, Thread] = field(default_factory=dict[str, Thread])
     # Secret threads the rescan keeps open, by finding id, with the reply that says why (ruling R38).

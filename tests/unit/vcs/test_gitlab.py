@@ -235,7 +235,7 @@ def test_threads_filters_bot_and_reads_resolved() -> None:
     threads = adapter.threads()
     assert len(threads) == 1
     t = threads[0]
-    assert (t.path, t.line, t.resolved) == ("a.py", 3, True)
+    assert (t.path, t.line, t.resolved, t.side) == ("a.py", 3, True, Side.NEW)
     assert t.marker is not None and t.marker.id == "f-1"
     assert [r.body for r in t.replies] == ["no"]
 

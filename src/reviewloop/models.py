@@ -89,6 +89,8 @@ class Thread(BaseModel):
     resolved: bool
     replies: list[Reply]
     marker: FindingMarker | None
+    # Side of `line`: an old-side line numbers the base file, not the head.
+    side: Side = Side.NEW
 
 
 class RunState(BaseModel):

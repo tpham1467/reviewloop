@@ -21,6 +21,7 @@ class FollowUpSummary:
             rebutted=sum(1 for fid in follow.resolved if follow.verdicts[fid].verdict == "valid_rebuttal"),
             still_open=sum(1 for v in given if v in ("not_fixed", "no_response")),
             not_rechecked=[fid for fid in follow.open_ids if fid not in follow.verdicts],
+            removed=len(follow.removed),
         )
         resolved = set(follow.resolved)
         open_ids = [fid for fid in follow.open_ids if fid not in resolved]

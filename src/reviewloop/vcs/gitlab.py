@@ -198,6 +198,7 @@ class GitLabAdapter:
                         if not n.get("system")
                     ],
                     marker=parse_finding_marker(first["body"]),
+                    side=Side.OLD if pos and not side_new else Side.NEW,
                 )
             )
         return result

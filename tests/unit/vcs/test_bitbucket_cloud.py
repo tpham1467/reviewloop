@@ -259,6 +259,7 @@ def test_threads_parse_markers() -> None:
     assert first.marker.id == "f1"
     assert [r.body for r in first.replies] == ["reply", "nested"]
     assert (second.path, second.line, second.resolved) == ("c.py", 4, True)
+    assert (first.side, second.side) == (Side.NEW, Side.OLD)
 
 
 def test_threads_follow_pagination() -> None:

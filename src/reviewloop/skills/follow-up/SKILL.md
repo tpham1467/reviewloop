@@ -11,6 +11,8 @@ Follow the output-contract skill for every output rule.
 
 For each open thread: `thread_id`, the original finding (severity, rule, text, quoted code), the transcript of replies, and the code now at the anchor in the current head. The diff since the previous review is under `.reviewloop/diff/`.
 
+Each thread file under `.reviewloop/follow-up/` holds `code_at_anchor` (numbered head lines around the anchor, or `null` when the finding has no head line) and `reviewloop_replies` (reviewloop's own earlier replies, never the author's answer).
+
 ## Verdicts
 
 Decide one verdict per thread, from the code first and the transcript second.
