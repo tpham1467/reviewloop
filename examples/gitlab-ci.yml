@@ -1,0 +1,17 @@
+# Add to .gitlab-ci.yml. Set these masked CI/CD variables (type Variable, not File):
+#   REVIEWLOOP_GITLAB_TOKEN  project access token, role Developer, scope api
+#   ANTHROPIC_API_KEY        your agent credential
+# For /reviewloop commands, add a Comments webhook that calls the pipeline trigger API (docs/getting-started/gitlab.md).
+include:
+  - component: $CI_SERVER_FQDN/tpham1467/reviewloop/reviewloop@0.1.0
+    inputs:
+      agent: claude-code
+
+# Projects with `workflow:rules` must allow merge request and trigger pipelines, for example:
+# workflow:
+#   rules:
+#     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+#     - if: $CI_PIPELINE_SOURCE == "trigger"
+#     - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+#       when: never
+#     - if: $CI_COMMIT_BRANCH
