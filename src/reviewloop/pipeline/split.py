@@ -11,25 +11,29 @@ def _top_dir(path: str) -> str:
     return head if sep else ""
 
 
-def _chunks(diffs: list[FileDiff], max_lines: int) -> list[list[FileDiff]]:
+Chunk = tuple[list[FileDiff], int]
+
+
+def _chunks(sized: list[tuple[FileDiff, int]], max_lines: int) -> list[Chunk]:
     """Each top-level directory's files, cut into runs of at most `max_lines`; a larger file is its own run."""
-    by_dir: dict[str, list[FileDiff]] = {}
-    for fd in diffs:
-        by_dir.setdefault(_top_dir(fd.path), []).append(fd)
-    chunks: list[list[FileDiff]] = []
+    by_dir: dict[str, list[tuple[FileDiff, int]]] = {}
+    for fd, lines in sized:
+        by_dir.setdefault(_top_dir(fd.path), []).append((fd, lines))
+    chunks: list[Chunk] = []
     for files in by_dir.values():
         current: list[FileDiff] = []
-        for fd in files:
-            lines = changed_lines([fd])
+        size = 0
+        for fd, lines in files:
             if lines > max_lines:
-                chunks.append([fd])
-            elif changed_lines([*current, fd]) > max_lines:
-                chunks.append(current)
-                current = [fd]
-            else:
-                current.append(fd)
+                chunks.append(([fd], lines))
+                continue
+            if size + lines > max_lines:
+                chunks.append((current, size))
+                current, size = [], 0
+            current.append(fd)
+            size += lines
         if current:
-            chunks.append(current)
+            chunks.append((current, size))
     return chunks
 
 
@@ -39,13 +43,16 @@ def plan_groups(diffs: list[FileDiff], max_lines: int = 3000, max_groups: int = 
     Files absent from the result were not grouped and the caller fails them as `too_large`: a single file above
     `max_lines * MAX_FILE_FACTOR`, and every file past the first `max_groups` groups.
     """
-    fitting = [fd for fd in diffs if changed_lines([fd]) <= max_lines * MAX_FILE_FACTOR]
+    sized = [(fd, changed_lines([fd])) for fd in diffs]
+    fitting = [(fd, lines) for fd, lines in sized if lines <= max_lines * MAX_FILE_FACTOR]
     groups: list[list[FileDiff]] = []
-    for chunk in _chunks(fitting, max_lines):
-        size = changed_lines(chunk)
-        target = next((g for g in groups if changed_lines(g) + size <= max_lines), None)
+    sizes: list[int] = []
+    for files, size in _chunks(fitting, max_lines):
+        target = next((i for i, used in enumerate(sizes) if used + size <= max_lines), None)
         if target is None:
-            groups.append(list(chunk))
+            groups.append(list(files))
+            sizes.append(size)
         else:
-            target.extend(chunk)
+            groups[target].extend(files)
+            sizes[target] += size
     return groups[:max_groups]

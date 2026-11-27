@@ -2,6 +2,7 @@
 
 import json
 import shutil
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TypeVar
 
@@ -9,7 +10,7 @@ from pydantic import BaseModel
 
 from reviewloop.agents.base import AgentTask
 from reviewloop.agents.runner import run_with_repair
-from reviewloop.diff import changed_lines
+from reviewloop.diff import FileDiff, changed_lines
 from reviewloop.errors import AgentStepError
 from reviewloop.models import Finding
 from reviewloop.pipeline.context import RunContext
@@ -24,6 +25,30 @@ def write_input(sandbox: Path, rel: str, content: str) -> None:
     path = sandbox / ".reviewloop" / rel
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
+
+_PREFIX = {"add": "+", "del": "-", "ctx": " "}
+
+
+def render_diff(fd: FileDiff) -> str:
+    head = f"--- {fd.old_path or fd.path}\n+++ {fd.path}\n"
+    hunks = [
+        f"@@ -{h.old_start} +{h.new_start} @@\n" + "".join(f"{_PREFIX[ln.kind]}{ln.text}\n" for ln in h.lines)
+        for h in fd.hunks
+    ]
+    return head + "".join(hunks)
+
+
+def write_diff(sandbox: Path, diffs: list[FileDiff], excluded: Mapping[str, str | None]) -> None:
+    """The diff index and one diff file per file not in `excluded` (path to reason) under `.reviewloop/diff/`."""
+    index = ["# Diff index", "", "| File | Status | Input |", "| --- | --- | --- |"]
+    for fd in diffs:
+        reason = excluded.get(fd.path)
+        where = f"excluded: {reason}" if reason else f"`.reviewloop/diff/files/{fd.path}.diff`"
+        index.append(f"| `{fd.path}` | {fd.status} | {where} |")
+        if reason is None:
+            write_input(sandbox, f"diff/files/{fd.path}.diff", render_diff(fd))
+    write_input(sandbox, "diff/index.md", "\n".join(index) + "\n")
 
 
 def numbered(findings: list[Finding]) -> str:

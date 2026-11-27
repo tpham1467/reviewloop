@@ -149,11 +149,12 @@ def test_group_failure_marks_its_files_failed_and_others_finish(make_ctx) -> Non
         run_flow([LargeDiffReview()], ctx)
 
     reason = "group 2: step 'initial-review-g2': agent timed out after 316s"
-    assert by_path(ctx) == {
-        "a/1.py": FileCoverage(path="a/1.py", status=CoverageStatus.REVIEWED),
-        "b/1.py": FileCoverage(path="b/1.py", status=CoverageStatus.FAILED, reason=reason),
-        "c/1.py": FileCoverage(path="c/1.py", status=CoverageStatus.REVIEWED),
-    }
+    # A list, not a dict by path: a file listed twice would show here.
+    assert ctx.coverage == [
+        FileCoverage(path="a/1.py", status=CoverageStatus.REVIEWED),
+        FileCoverage(path="b/1.py", status=CoverageStatus.FAILED, reason=reason),
+        FileCoverage(path="c/1.py", status=CoverageStatus.REVIEWED),
+    ]
     assert sorted(ctx.agent.steps()) == ["initial-review-g1", "initial-review-g2", "initial-review-g3"]
     summary = ctx.vcs.summary or ""
     assert "Review failed: large-diff review: 1 of 3 review groups failed" in summary
@@ -161,10 +162,33 @@ def test_group_failure_marks_its_files_failed_and_others_finish(make_ctx) -> Non
     assert exit_code(ctx.findings, ctx.coverage, "none") == 2
 
 
+def test_overflow_with_group_failure(make_ctx, monkeypatch) -> None:
+    def broken(task: AgentTask) -> dict[str, Any]:
+        raise AgentStepError(f"step '{task.step}': agent exited with exit code 1")
+
+    monkeypatch.setattr(large_diff_review, "MAX_GROUPS", 2)
+    diffs = [fd("a/1.py", 8), fd("b/1.py", 8), fd("c/1.py", 8), fd("d/1.py", 50)]
+    ctx = split_ctx(make_ctx, diffs, **{"initial-review-g1": broken})
+
+    with pytest.raises(ReviewloopError, match="1 of 2 review groups failed"):
+        run_flow([LargeDiffReview()], ctx)
+
+    assert ctx.coverage == [
+        FileCoverage(path="a/1.py", status=CoverageStatus.FAILED,
+                     reason="group 1: step 'initial-review-g1': agent exited with exit code 1"),
+        FileCoverage(path="b/1.py", status=CoverageStatus.REVIEWED),
+        FileCoverage(path="c/1.py", status=CoverageStatus.FAILED, reason="too_large"),
+        FileCoverage(path="d/1.py", status=CoverageStatus.FAILED, reason="too_large"),
+    ]  # fmt: skip
+    assert sorted(ctx.agent.steps()) == ["initial-review-g1", "initial-review-g2"]
+
+
 @pytest.mark.parametrize(("lines", "steps"), [(8, ["initial-review-g1", "initial-review-g2"]), (5, ["initial-review"])])
 def test_initial_review_skipped_after_split(make_ctx, lines: int, steps: list[str]) -> None:
     ctx = split_ctx(make_ctx, [fd("a/1.py", lines), fd("b/1.py", lines)], **{"initial-review": reviewer})
 
+    # One parallel batch: build-context already decided, so neither step reads a flag the other writes.
+    assert LargeDiffReview.group == InitialReview.group == "review"
     run_flow([LargeDiffReview(), InitialReview()], ctx)
 
     assert ctx.split_review is (lines * 2 > 10)
@@ -220,3 +244,59 @@ def test_parallelism_at_most_5(make_ctx) -> None:
     assert 1 < peak <= large_diff_review.PARALLEL_GROUPS == 5
     assert len(ctx.agent.tasks) == 8
     assert all(c.status is CoverageStatus.REVIEWED for c in ctx.coverage)
+
+
+def test_split_runs_in_review_group_with_security_branch(make_ctx, monkeypatch) -> None:
+    from reviewloop.pipeline.flows import initial_flow
+    from reviewloop.pipeline.steps.initial import security_branch
+    from reviewloop.pipeline.steps.initial.pr_overview import PrOverview
+
+    monkeypatch.setattr(security_branch, "run_scanners", lambda *a: [])
+    started = threading.Barrier(3, timeout=5)
+
+    def together(answer: dict[str, Any] | None = None):
+        def run(task: AgentTask) -> dict[str, Any]:
+            # Each of the three steps waits here until the other two have started: they share one batch.
+            started.wait()
+            return answer or reviewer(task)
+
+        return run
+
+    ctx = split_ctx(make_ctx, [fd("a/1.py", 8), fd("b/1.py", 8)], **{
+        "initial-review-g1": together(),
+        "initial-review-g2": reviewer,
+        "security-review": together({"findings": [], "coverage": []}),
+        "pr-overview": together({"markdown": "m"}),
+    })  # fmt: skip
+    steps = [s for s in initial_flow() if s.group == "review"]
+    assert [s.id for s in steps] == ["large-diff-review", "initial-review", "security-branch", "pr-overview"]
+
+    run_flow([LargeDiffReview(), InitialReview(), security_branch.SecurityBranch(), PrOverview()], ctx)
+
+    assert sorted(ctx.agent.steps()) == ["initial-review-g1", "initial-review-g2", "pr-overview", "security-review"]
+    assert {t.step: t.workdir.name for t in ctx.agent.tasks} == {
+        "initial-review-g1": "sandbox-group-1", "initial-review-g2": "sandbox-group-2",
+        "security-review": "sandbox-security", "pr-overview": "sandbox-overview",
+    }  # fmt: skip
+    assert ctx.overview == "m"
+    assert [(c.path, c.status) for c in ctx.coverage] == [
+        ("a/1.py", CoverageStatus.REVIEWED),
+        ("b/1.py", CoverageStatus.REVIEWED),
+    ]
+
+
+def test_interrupt_cancels_groups_not_started(make_ctx, monkeypatch) -> None:
+    def interrupted(futures):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(large_diff_review, "PARALLEL_GROUPS", 1)
+    monkeypatch.setattr(large_diff_review, "wait", interrupted)
+    diffs = [fd(f"d{n}/f.py", 8) for n in range(4)]
+    ctx = split_ctx(make_ctx, diffs)
+
+    with pytest.raises(KeyboardInterrupt):
+        LargeDiffReview().run(ctx)
+
+    # With one worker, the queued groups are cancelled instead of run after the interrupt.
+    assert len(ctx.agent.tasks) < 4
+    assert ctx.coverage == []
