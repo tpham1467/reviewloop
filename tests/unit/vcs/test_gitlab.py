@@ -170,8 +170,8 @@ def test_post_inline_out_of_diff_is_general_with_location() -> None:
 def test_post_inline_includes_suggestion_for_multiline() -> None:
     adapter, mr, _ = make(MR_ENV)
     mr.discussions.create.return_value = SimpleNamespace(id="d1", attributes={})
-    f = finding(existing_code="a\nb", suggestion="c\nd")
-    adapter.post_inline(f, Anchor(path="a.py", line=4, side=Side.NEW, in_diff=True))
+    f = finding(suggestion="c\nd")
+    adapter.post_inline(f, Anchor(path="a.py", line=4, start_line=3, side=Side.NEW, in_diff=True))
     assert "```suggestion:-1+0\nc\nd\n```" in mr.discussions.create.call_args.args[0]["body"]
 
 
@@ -307,8 +307,8 @@ def test_post_inline_falls_back_to_general_when_position_rejected() -> None:
         GitlabCreateError("bad position", 400),
         SimpleNamespace(id="d9", attributes={"notes": [{"id": 1}]}),
     ]
-    f = finding(existing_code="a\nb", suggestion="c")
-    ref = adapter.post_inline(f, Anchor(path="a.py", line=3, side=Side.NEW, in_diff=True))
+    f = finding(suggestion="c")
+    ref = adapter.post_inline(f, Anchor(path="a.py", line=3, start_line=2, side=Side.NEW, in_diff=True))
     assert ref.id == "d9"
     first, second = (c.args[0] for c in mr.discussions.create.call_args_list)
     assert "position" in first and "position" not in second
@@ -347,14 +347,36 @@ def test_mr_and_payload_are_memoized() -> None:
     assert project.mergerequests.get.call_count == 1
 
 
-@pytest.mark.parametrize(("code", "expected"), [("", "-0+0"), ("a\nb\nc", "-2+0")])
-def test_post_inline_suggestion_range_from_existing_code(code: str, expected: str) -> None:
+@pytest.mark.parametrize(
+    ("code", "start", "expected"), [("a\nb\nc", None, "-0+0"), ("a", 3, "-2+0"), ("\nb\n\n", 4, "-1+0")]
+)
+def test_post_inline_suggestion_range_from_anchor(code: str, start: int | None, expected: str) -> None:
+    # The range comes from the anchor; the quote's own line count is ignored.
+    adapter, mr, _ = make(MR_ENV)
+    mr.discussions.create.return_value = SimpleNamespace(id="d1", attributes={})
+    anchor = Anchor(path="a.py", line=5, start_line=start, side=Side.NEW, in_diff=True)
+    adapter.post_inline(finding(existing_code=code, suggestion="z"), anchor)
+    assert f"```suggestion:{expected}\nz\n```" in mr.discussions.create.call_args.args[0]["body"]
+
+
+def test_post_inline_no_suggestion_over_30_lines() -> None:
     adapter, mr, _ = make(MR_ENV)
     mr.discussions.create.return_value = SimpleNamespace(id="d1", attributes={})
     adapter.post_inline(
-        finding(existing_code=code, suggestion="z"), Anchor(path="a.py", line=5, side=Side.NEW, in_diff=True)
+        finding(suggestion="z"), Anchor(path="a.py", line=40, start_line=10, side=Side.NEW, in_diff=True)
     )
-    assert f"```suggestion:{expected}\nz\n```" in mr.discussions.create.call_args.args[0]["body"]
+    assert mr.discussions.create.call_args.args[0]["body"] == "bad"
+    adapter.post_inline(
+        finding(suggestion="z"), Anchor(path="a.py", line=39, start_line=10, side=Side.NEW, in_diff=True)
+    )
+    assert "```suggestion:-29+0\nz\n```" in mr.discussions.create.call_args.args[0]["body"]
+
+
+def test_post_inline_out_of_diff_range_location() -> None:
+    adapter, mr, _ = make(MR_ENV)
+    mr.discussions.create.return_value = SimpleNamespace(id="d1", attributes={})
+    adapter.post_inline(finding(), Anchor(path="a.py", line=9, start_line=7, side=Side.NEW, in_diff=False))
+    assert mr.discussions.create.call_args.args[0]["body"] == "`a.py:7-9`\n\nbad"
 
 
 def test_suggestion_block_clamps_replaced_lines() -> None:

@@ -31,10 +31,6 @@ _MAX_SUGGESTION_LINES = 30
 _NOT_FOUND = 404
 
 
-def _quoted_lines(finding: Finding) -> int:
-    return max(1, len(finding.existing_code.splitlines()))
-
-
 def _user(raw: Mapping[str, Any]) -> User:
     return User(id=str(raw["id"]), username=str(raw["username"]))
 
@@ -205,7 +201,7 @@ class GitLabAdapter:
         return result
 
     def _finding_body(self, finding: Finding, anchor: Anchor) -> str:
-        lines = _quoted_lines(finding)
+        lines = anchor.line - (anchor.start_line or anchor.line) + 1
         if not finding.suggestion or finding.security or lines > _MAX_SUGGESTION_LINES:
             return finding.text
         block = self.suggestion_block(anchor, finding.suggestion, replaced_lines=lines)
@@ -213,8 +209,7 @@ class GitLabAdapter:
 
     def post_inline(self, finding: Finding, anchor: Anchor) -> ThreadRef:
         mr = self._mr(self._pr_number())
-        lines = _quoted_lines(finding)
-        span = f"{anchor.line - lines + 1}-{anchor.line}" if lines > 1 else str(anchor.line)
+        span = f"{anchor.start_line}-{anchor.line}" if anchor.start_line is not None else str(anchor.line)
         located = f"`{anchor.path}:{span}`\n\n{finding.text}"
         if not anchor.in_diff:
             return self._create_discussion(mr, {"body": located})

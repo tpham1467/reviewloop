@@ -177,13 +177,28 @@ def _inline_pr(adapter, repo):
 NEW = Anchor(path="a.py", line=10, side=Side.NEW, in_diff=True)
 
 
+RANGE = Anchor(path="a.py", line=10, start_line=8, side=Side.NEW, in_diff=True)
+
+
 def test_post_inline_multiline_sets_start_line():
     adapter, _, repo = make("comment_review.json")
     pr = _inline_pr(adapter, repo)
-    f = finding().model_copy(update={"existing_code": "a\nb\nc"})
-    adapter.post_inline(f, NEW)
+    # The range comes from the anchor, not from counting the quoted lines.
+    adapter.post_inline(finding(), RANGE)
     kw = pr.create_review_comment.call_args.kwargs
     assert (kw["start_line"], kw["line"], kw["start_side"]) == (8, 10, "RIGHT")
+
+
+def test_post_inline_multiline_old_side_and_quote_length_ignored():
+    adapter, _, repo = make("comment_review.json")
+    pr = _inline_pr(adapter, repo)
+    f = finding().model_copy(update={"existing_code": "a\nb\nc\nd\ne"})
+    adapter.post_inline(f, Anchor(path="a.py", line=6, start_line=5, side=Side.OLD, in_diff=True))
+    kw = pr.create_review_comment.call_args.kwargs
+    assert (kw["start_line"], kw["line"], kw["start_side"], kw["side"]) == (5, 6, "LEFT", "LEFT")
+    f = finding().model_copy(update={"existing_code": "a\nb\nc"})
+    adapter.post_inline(f, NEW)
+    assert "start_line" not in pr.create_review_comment.call_args.kwargs
 
 
 def test_post_inline_attaches_suggestion_when_eligible():
@@ -206,9 +221,11 @@ def test_post_inline_no_suggestion_for_security():
 def test_post_inline_no_suggestion_over_30_lines():
     adapter, _, repo = make("comment_review.json")
     pr = _inline_pr(adapter, repo)
-    f = finding().model_copy(update={"suggestion": "y", "existing_code": "\n".join("l" * 31)})
-    adapter.post_inline(f, NEW)
+    f = finding().model_copy(update={"suggestion": "y"})
+    adapter.post_inline(f, Anchor(path="a.py", line=40, start_line=10, side=Side.NEW, in_diff=True))
     assert pr.create_review_comment.call_args.kwargs["body"] == "body"
+    adapter.post_inline(f, Anchor(path="a.py", line=39, start_line=10, side=Side.NEW, in_diff=True))
+    assert pr.create_review_comment.call_args.kwargs["body"] == "body\n\n```suggestion\ny\n```"
 
 
 def test_post_inline_file_level_when_outside_diff():
@@ -388,21 +405,13 @@ def test_post_inline_422_falls_back_to_general_comment():
         adapter.post_inline(finding(), NEW)
 
 
-def test_post_inline_start_line_clamped_to_one():
-    adapter, _, repo = make("comment_review.json")
-    pr = _inline_pr(adapter, repo)
-    f = finding().model_copy(update={"existing_code": "a\nb\nc"})
-    adapter.post_inline(f, Anchor(path="a.py", line=2, side=Side.NEW, in_diff=True))
-    assert pr.create_review_comment.call_args.kwargs["start_line"] == 1
-
-
 def test_post_inline_422_fallback_cites_range_without_suggestion():
     adapter, _, repo = make("comment_review.json")
     pr = _pull(adapter, repo)
     pr.create_review_comment.side_effect = GithubException(422, {}, {})
     pr.create_issue_comment.return_value = NS(id=55)
-    f = finding().model_copy(update={"existing_code": "a\nb", "suggestion": "y"})
-    adapter.post_inline(f, NEW)
+    f = finding().model_copy(update={"existing_code": "a", "suggestion": "y"})
+    adapter.post_inline(f, Anchor(path="a.py", line=10, start_line=9, side=Side.NEW, in_diff=True))
     sent = pr.create_issue_comment.call_args.args[0]
     assert sent.startswith("`a.py:9-10`")
     assert "```suggestion" not in sent

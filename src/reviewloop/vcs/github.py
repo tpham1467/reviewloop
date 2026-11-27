@@ -256,16 +256,16 @@ class GitHubAdapter:
         pr = self._pull()
         body = finding.text
         kwargs: dict[str, Any] = {"commit": pr.head.sha, "path": anchor.path}
-        span = len(finding.existing_code.splitlines()) or 1
         if anchor.in_diff:
             side = "LEFT" if anchor.side == Side.OLD else "RIGHT"
             if finding.suggestion is not None and not finding.security:
+                span = anchor.line - (anchor.start_line or anchor.line) + 1
                 block = self.suggestion_block(anchor, finding.suggestion, span)
                 if block is not None:
                     body = f"{body}\n\n{block}"
             kwargs.update(line=anchor.line, side=side)
-            if span > 1:
-                kwargs.update(start_line=max(1, anchor.line - span + 1), start_side=side)
+            if anchor.start_line is not None:
+                kwargs.update(start_line=anchor.start_line, start_side=side)
         else:
             kwargs["subject_type"] = "file"
         try:
@@ -274,8 +274,7 @@ class GitHubAdapter:
             if exc.status != 422:
                 raise
             # GitHub rejects positions it cannot place (for example a range crossing hunks).
-            start = max(1, anchor.line - span + 1)
-            where = f"{start}-{anchor.line}" if anchor.in_diff and span > 1 else str(anchor.line)
+            where = f"{anchor.start_line}-{anchor.line}" if anchor.start_line is not None else str(anchor.line)
             # A general comment cannot apply a suggestion block, so use the bare text.
             return self.post_general(f"`{anchor.path}:{where}`\n\n{finding.text}")
         return ThreadRef(id=str(comment.id), note_id=str(comment.id))

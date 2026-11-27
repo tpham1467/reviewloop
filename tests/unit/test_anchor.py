@@ -56,13 +56,25 @@ def test_anchor_multiline_quote_uses_last_line() -> None:
     quote = "        data = self.fetch()\n" + COMPUTE_NEW + "\n"
     diffs = _diffs()
     assert resolve_anchor(_finding(quote, 116), diffs, _no_files) == Anchor(
-        path="app/service.py", line=117, side=Side.NEW, in_diff=True
+        path="app/service.py", line=117, start_line=116, side=Side.NEW, in_diff=True
     )
     assert resolve_anchor(_finding(quote, 139), diffs, _no_files) == Anchor(
-        path="app/service.py", line=140, side=Side.NEW, in_diff=True
+        path="app/service.py", line=140, start_line=139, side=Side.NEW, in_diff=True
     )
     three = "    def run(self):\n        data = self.fetch()\n" + COMPUTE_NEW
     assert resolve_anchor(_finding(three, 115), diffs, _no_files) == Anchor(
+        path="app/service.py", line=117, start_line=115, side=Side.NEW, in_diff=True
+    )
+
+
+def test_anchor_start_line_counts_matched_window_not_quote() -> None:
+    # Blank edge lines in the quote are dropped, so the range is two lines, not four.
+    quote = "\n        data = self.fetch()\n" + COMPUTE_NEW + "\n\n"
+    assert resolve_anchor(_finding(quote, 116), _diffs(), _no_files) == Anchor(
+        path="app/service.py", line=117, start_line=116, side=Side.NEW, in_diff=True
+    )
+    # Single-line quotes leave start_line unset.
+    assert resolve_anchor(_finding(COMPUTE_NEW, 117), _diffs(), _no_files) == Anchor(
         path="app/service.py", line=117, side=Side.NEW, in_diff=True
     )
 
@@ -93,7 +105,7 @@ def test_anchor_old_side_removed_line() -> None:
     )
     removed_with_context = "    payload = build()\n    send(payload)"
     assert resolve_anchor(_finding(removed_with_context, 10, path="app/client.py"), diffs, _no_files) == Anchor(
-        path="app/client.py", line=11, side=Side.OLD, in_diff=True
+        path="app/client.py", line=11, start_line=10, side=Side.OLD, in_diff=True
     )
 
 
@@ -117,7 +129,7 @@ def test_anchor_full_file_match_is_file_level_even_when_ending_inside_hunk() -> 
     reader = _files({"app/service.py": "\n".join(lines)})
     quote = "    # before run\n    def run(self):"
     assert resolve_anchor(_finding(quote, 114), _diffs(), reader) == Anchor(
-        path="app/service.py", line=115, side=Side.NEW, in_diff=False
+        path="app/service.py", line=115, start_line=114, side=Side.NEW, in_diff=False
     )
 
 
@@ -182,6 +194,15 @@ def test_anchor_uses_cause_code() -> None:
     )
 
 
+def test_anchor_multiline_cause_code_in_other_file_sets_start_line() -> None:
+    caller = _finding(
+        "    wrap(payload)", 42, path="app/caller.py", cause_code="    payload = build()\n    send(payload)"
+    )
+    assert resolve_anchor(caller, _diffs(), _no_files) == Anchor(
+        path="app/client.py", line=11, start_line=10, side=Side.OLD, in_diff=True
+    )
+
+
 def test_anchor_cause_code_skips_full_file() -> None:
     # A cause must be changed code: a full-file match does not count, so existing_code decides.
     reader = _files({"app/service.py": "def helper():\n"})
@@ -204,11 +225,11 @@ def test_anchor_cause_code_falls_back_to_existing_code() -> None:
 
 def test_anchor_crlf_and_no_newline() -> None:
     assert resolve_anchor(_finding("beta\r\ngamma\r\n", 3, path="cfg.txt"), _diffs("no_newline.diff"), _no_files) == (
-        Anchor(path="cfg.txt", line=3, side=Side.NEW, in_diff=True)
+        Anchor(path="cfg.txt", line=3, start_line=2, side=Side.NEW, in_diff=True)
     )
     crlf = "diff --git a/w.txt b/w.txt\n--- a/w.txt\n+++ b/w.txt\n@@ -1 +1,2 @@\n one\r\n+two\r\n"
     assert resolve_anchor(_finding("one\ntwo", 1, path="w.txt"), parse_unified_diff(crlf), _no_files) == Anchor(
-        path="w.txt", line=2, side=Side.NEW, in_diff=True
+        path="w.txt", line=2, start_line=1, side=Side.NEW, in_diff=True
     )
 
 

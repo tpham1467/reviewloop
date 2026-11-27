@@ -61,9 +61,15 @@ def _windows(quote: list[str], runs: list[_Run], norm: _Norm) -> list[_Window]:
     return hits
 
 
-def _nearest(hits: list[_Window], line: int) -> int:
-    """Pick the window whose first line is nearest to `line` (ties go lower); anchor on its last line."""
-    return min(hits, key=lambda w: (abs(w[0] - line), w[0]))[1]
+def _nearest(hits: list[_Window], line: int) -> _Window:
+    """Pick the window whose first line is nearest to `line`; ties go to the lower line."""
+    return min(hits, key=lambda w: (abs(w[0] - line), w[0]))
+
+
+def _at(path: str, window: _Window, side: Side, in_diff: bool) -> Anchor:
+    """Anchor on the window's last line; a multi-line window also carries its first line."""
+    first, last = window
+    return Anchor(path=path, line=last, start_line=first if first != last else None, side=side, in_diff=in_diff)
 
 
 def _anchor_quote(
@@ -78,7 +84,7 @@ def _anchor_quote(
         for side, norm in _DIFF_PASSES:
             hits = _windows(quote, _runs(own, side), norm)
             if hits:
-                return Anchor(path=own.path, line=_nearest(hits, line), side=side, in_diff=True)
+                return _at(own.path, _nearest(hits, line), side, in_diff=True)
         readable = own.status != "deleted" and not own.is_binary
         text = read_new_file(own.path) if read_new_file is not None and readable else None
         if text is not None:
@@ -86,12 +92,12 @@ def _anchor_quote(
             for norm in (_exact, _loose):
                 hits = _windows(quote, [run], norm)
                 if hits:
-                    return Anchor(path=own.path, line=_nearest(hits, line), side=Side.NEW, in_diff=False)
+                    return _at(own.path, _nearest(hits, line), Side.NEW, in_diff=False)
     for side, norm in _DIFF_PASSES:
         found = [(fd.path, w) for fd in others for w in _windows(quote, _runs(fd, side), norm)]
         if len(found) == 1:
-            path, (_, last) = found[0]
-            return Anchor(path=path, line=last, side=side, in_diff=True)
+            path, window = found[0]
+            return _at(path, window, side, in_diff=True)
         if found:
             return None  # ambiguous across other files
     return None
