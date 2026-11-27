@@ -2,7 +2,7 @@ import math
 from typing import Literal
 
 from reviewloop.models import CoverageStatus, FileCoverage, Finding, RunState, Severity
-from reviewloop.output.redact import redact
+from reviewloop.output.redact import safe_text
 from reviewloop.state import render_state_marker
 
 _PENALTY = {
@@ -11,6 +11,7 @@ _PENALTY = {
     Severity.MEDIUM: 1.0,
     Severity.LOW: 0.25,
 }
+SUMMARY_HEADER = "<!-- reviewloop:summary -->"
 _STATUS = {"reviewing": "Reviewing...", "rechecking": "Re-checking...", "done": "Review complete"}
 
 
@@ -33,7 +34,7 @@ def exit_code(findings: list[Finding], coverage: list[FileCoverage], fail_on: st
 
 
 def _clean(text: str, one_line: bool = False) -> str:
-    text = redact(text).replace("<!--", "&lt;!--").replace("-->", "--&gt;")
+    text = safe_text(text)
     return " ".join(text.split()) if one_line else text
 
 
@@ -48,7 +49,7 @@ def render_summary(
     status_line = (
         f"Review failed: {_clean(error or 'unknown error', one_line=True)}" if status == "failed" else _STATUS[status]
     )
-    lines = ["<!-- reviewloop:summary -->", status_line, "", _clean(overview), ""]
+    lines = [SUMMARY_HEADER, status_line, "", _clean(overview), ""]
     lines += ["| Severity | Count |", "| --- | --- |"]
     for sev in Severity:
         lines.append(f"| {sev.value} | {sum(1 for f in findings if f.severity is sev)} |")
@@ -60,3 +61,8 @@ def render_summary(
         lines += [f"- {c.path}: {_clean(c.reason or 'unknown', one_line=True)}" for c in failed]
     lines += ["", f"Score: {score(findings, coverage)}/10", render_state_marker(state)]
     return "\n".join(lines)
+
+
+def render_notice(text: str, state: RunState) -> str:
+    """A one-line summary ("Reviewing...", "Review skipped: ...") that keeps the run-state marker."""
+    return f"{SUMMARY_HEADER}\n{_clean(text, one_line=True)}\n\n{render_state_marker(state)}"

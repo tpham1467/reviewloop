@@ -23,6 +23,11 @@ def redact(text: str) -> str:
     return _PASSWORD.sub(lambda m: m.group(1) + _PLACEHOLDER, text)
 
 
+def safe_text(text: str) -> str:
+    """Redact secrets and neutralize HTML comments, so free text can neither leak a secret nor forge a marker."""
+    return redact(text).replace("<!--", "&lt;!--").replace("-->", "--&gt;")
+
+
 def redact_finding(f: Finding) -> Finding:
     return f.model_copy(
         update={

@@ -173,5 +173,10 @@ def parse_unified_diff(text: str) -> list[FileDiff]:
     return [b.build() for b in files]
 
 
+def changed_lines(diffs: list[FileDiff]) -> int:
+    """Added plus removed lines over all files."""
+    return sum(1 for fd in diffs for h in fd.hunks for ln in h.lines if ln.kind != "ctx")
+
+
 def changed_new_lines(fd: FileDiff) -> set[int]:
     return {ln.new_no for h in fd.hunks for ln in h.lines if ln.kind == "add" and ln.new_no is not None}
