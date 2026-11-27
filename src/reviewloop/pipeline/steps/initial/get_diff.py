@@ -1,8 +1,7 @@
-import os
 import re
 import subprocess
 
-from reviewloop.agents.isolation import GIT_ENV
+from reviewloop.agents.isolation import host_git_env
 from reviewloop.diff import FileDiff, parse_unified_diff
 from reviewloop.errors import ReviewloopError
 from reviewloop.models import CoverageStatus, FileCoverage
@@ -50,7 +49,7 @@ def _has_nul(ctx: RunContext, rev: str, path: str) -> bool:
     with subprocess.Popen(  # noqa: S603
         ["git", "cat-file", "blob", f"{rev}:{path}"],  # noqa: S607
         cwd=ctx.source_dir,
-        env={**os.environ, **GIT_ENV},
+        env=host_git_env(ctx.source_dir),
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
     ) as proc:

@@ -63,8 +63,24 @@ def _real_git() -> str:
     return os.path.realpath(git)
 
 
-def _git(cwd: Path, *args: str, stdin: str | None = None) -> str:
-    env = {**os.environ, **GIT_ENV}
+def host_git_env(trusted: Path | None = None) -> dict[str, str]:
+    """Environment for reviewloop's own git calls: no system, global or runner-injected config.
+
+    `trusted` is the CI checkout. The container user may not own it, and without a global config git then refuses it
+    ("dubious ownership"), so exactly that path is marked `safe.directory` (ruling R83). Never `*`, and never the
+    agent sandbox, which holds content the agent controls.
+    """
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))}
+    env.pop("GIT_CONFIG_PARAMETERS", None)
+    env.pop("GIT_CONFIG_COUNT", None)
+    env.update(GIT_ENV)
+    if trusted is not None:
+        env.update(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="safe.directory", GIT_CONFIG_VALUE_0=str(trusted.resolve()))
+    return env
+
+
+def _git(cwd: Path, *args: str, stdin: str | None = None, trust: Path | None = None) -> str:
+    env = host_git_env(trust)
     result = subprocess.run(  # noqa: S603
         [_real_git(), *args], cwd=cwd, env=env, input=stdin, capture_output=True, text=True, check=False
     )
@@ -95,7 +111,7 @@ def _without_userinfo(url: str) -> str:
 
 def _strip_credentials(repo: Path, where: list[str]) -> None:
     """Apply the checkout credential rules to one config file, `where` being `--local` or `--file <path>`."""
-    listing = _git(repo, "config", *where, "--no-includes", "--name-only", "--list")
+    listing = _git(repo, "config", *where, "--no-includes", "--name-only", "--list", trust=repo)
     removed: set[str] = set()
     for key in sorted(set(listing.split())):
         section, _, rest = key.partition(".")
@@ -105,14 +121,14 @@ def _strip_credentials(repo: Path, where: list[str]) -> None:
             name = f"{section}.{subsection}"
             if name not in removed:
                 removed.add(name)
-                _git(repo, "config", *where, "--remove-section", name)
+                _git(repo, "config", *where, "--remove-section", name, trust=repo)
         elif _URL_VALUE.match(key.lower()):
-            values = _git(repo, "config", *where, "--no-includes", "--get-all", key).splitlines()
-            _git(repo, "config", *where, "--unset-all", key)
+            values = _git(repo, "config", *where, "--no-includes", "--get-all", key, trust=repo).splitlines()
+            _git(repo, "config", *where, "--unset-all", key, trust=repo)
             for value in values:
-                _git(repo, "config", *where, "--add", key, _without_userinfo(value))
+                _git(repo, "config", *where, "--add", key, _without_userinfo(value), trust=repo)
         elif _CHECKOUT_CREDENTIAL_CONFIG.match(key.lower()):
-            _git(repo, "config", *where, "--unset-all", key)
+            _git(repo, "config", *where, "--unset-all", key, trust=repo)
 
 
 def strip_checkout_credentials(source: Path) -> None:
@@ -189,13 +205,15 @@ def prepare_sandbox(source: Path, dest: Path, rev: str) -> Path:
         raise AgentStepError(f"sandbox: source checkout {source} does not exist")
     if not COMMIT_SHA.fullmatch(rev):
         raise ReviewloopError("sandbox: the pull request head is not a full hex commit id")
-    _git(source, "rev-parse", "--git-dir")
+    _git(source, "rev-parse", "--git-dir", trust=source)
     try:
-        _git(source, "cat-file", "-e", f"{rev}^{{commit}}")
+        _git(source, "cat-file", "-e", f"{rev}^{{commit}}", trust=source)
     except AgentStepError:
         raise ReviewloopError(f"sandbox: commit {rev} is not in the CI checkout; {HEAD_FETCH_HINT}") from None
     dest.parent.mkdir(parents=True, exist_ok=True)
-    _git(dest.parent, "clone", "--no-local", "--no-hardlinks", "--no-checkout", "--quiet", str(source), str(dest))
+    # upload-pack runs in `source`, so the clone and the fetch below need it trusted; nothing trusts `dest`.
+    clone = ("clone", "--no-local", "--no-hardlinks", "--no-checkout", "--quiet", str(source), str(dest))
+    _git(dest.parent, *clone, trust=source)
     _strip_config(dest)
     _git(dest, "config", "--local", "core.symlinks", "false")
     # Remove hooks before the checkout so no template hook can run.
@@ -205,7 +223,7 @@ def prepare_sandbox(source: Path, dest: Path, rev: str) -> Path:
         _git(dest, "cat-file", "-e", f"{rev}^{{commit}}")
     except AgentStepError:
         # The clone copies refs only; a head that no ref reaches is fetched by id.
-        _git(dest, "fetch", "--quiet", "--no-tags", str(source), rev)
+        _git(dest, "fetch", "--quiet", "--no-tags", str(source), rev, trust=source)
     _git(dest, "-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", rev)
     _clean_tree(dest)
     (dest / ".reviewloop" / "out").mkdir(parents=True)

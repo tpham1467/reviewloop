@@ -195,12 +195,16 @@ def test_scan_history_unavailable_is_none(monkeypatch: pytest.MonkeyPatch, tmp_p
 def test_opengrep_scans_tree_gitleaks_scans_repo(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     _installed(monkeypatch, "gitleaks", "opengrep")
     cwds: dict[str, Path] = {}
+    trust: dict[str, str | None] = {}
 
     def run(cmd: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
         cwds[cmd[0]] = kw["cwd"]
+        trust[cmd[0]] = (kw["env"] or {}).get("GIT_CONFIG_VALUE_0")
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     monkeypatch.setattr(scanners.subprocess, "run", run)
     repo, tree = tmp_path / "checkout", tmp_path / "sandbox-security"
     run_scanners(["gitleaks", "opengrep"], repo, tree, "a", "b", ["x.py"])
     assert cwds == {"gitleaks": repo, "opengrep": tree}
+    # gitleaks runs git in the checkout, which is trusted; opengrep reads the head copy and gets no git trust.
+    assert trust == {"gitleaks": str(repo.resolve()), "opengrep": None}
