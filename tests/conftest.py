@@ -191,3 +191,18 @@ def make_ctx(tmp_path: Path) -> Callable[..., Any]:
         return ctx
 
     return _make
+
+
+@pytest.fixture
+def make_vcs() -> Callable[..., FakeVcs]:
+    """A FakeVcs over `make_pr(**pr_overrides)`, for code that builds its own RunContext (the CLI)."""
+
+    def _make(files: dict[str, str] | None = None, **pr_overrides: Any) -> FakeVcs:
+        return FakeVcs(make_pr(**pr_overrides), files)
+
+    return _make
+
+
+@pytest.fixture
+def make_agent() -> Callable[..., FakeAgent]:
+    return FakeAgent
