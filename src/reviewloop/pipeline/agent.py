@@ -2,7 +2,7 @@
 
 import json
 import shutil
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TypeVar
 
@@ -49,6 +49,23 @@ def write_diff(sandbox: Path, diffs: list[FileDiff], excluded: Mapping[str, str 
         if reason is None:
             write_input(sandbox, f"diff/files/{fd.path}.diff", render_diff(fd))
     write_input(sandbox, "diff/index.md", "\n".join(index) + "\n")
+
+
+Reader = Callable[[str], str | None]
+
+
+def sandbox_reader(sandbox: Path) -> Reader:
+    """Read a file of the PR head by repository path; None for a missing file or a path outside the sandbox."""
+    root = sandbox.resolve()
+
+    def read(path: str) -> str | None:
+        # The sandbox is the PR head with links checked out as plain files, so no read leaves it.
+        target = (root / path).resolve()
+        if not target.is_relative_to(root) or not target.is_file():
+            return None
+        return target.read_text(encoding="utf-8", errors="replace")
+
+    return read
 
 
 def numbered(findings: list[Finding]) -> str:

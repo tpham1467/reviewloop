@@ -95,3 +95,13 @@ def anchor_repair(step: str, language: str, repair_file: str) -> str:
         'quotes, or with `existing_code` set to "" when you cannot find its code. `coverage` has one entry per file '
         f"in `files` of `{repair_file}`.",
     )
+
+
+def follow_up(step: str, language: str) -> str:
+    return _prompt(
+        step,
+        language,
+        "Follow the follow-up skill. Inputs: one JSON file per open thread in `.reviewloop/follow-up/`, and "
+        "`.reviewloop/diff/index.md` with the per-file diffs under `.reviewloop/diff/` (the changes since the "
+        "previous review).",
+    )

@@ -8,9 +8,9 @@ from reviewloop.errors import ReviewloopError
 from reviewloop.models import CoverageStatus, FileCoverage
 from reviewloop.output.redact import redact
 from reviewloop.pipeline.context import RunContext
+from reviewloop.pipeline.git import is_sha, run_git
 from reviewloop.stacks import glob_match
 
-_SHA = re.compile(r"[0-9a-f]{7,64}")
 _VERSION = re.compile(r"git version (\d+)\.(\d+)")
 # `--attr-source` (git 2.40) reads .gitattributes from a given tree instead of the PR head's working tree.
 ATTR_SOURCE_VERSION = (2, 40)
@@ -26,13 +26,7 @@ DIFF_ARGS = ("diff", "--no-color", "--no-ext-diff", "--no-textconv", "-M")
 
 
 def _run(ctx: RunContext, *args: str) -> bytes:
-    result = subprocess.run(  # noqa: S603
-        ["git", *args],  # noqa: S607
-        cwd=ctx.source_dir,
-        env={**os.environ, **GIT_ENV},
-        capture_output=True,
-        check=False,
-    )
+    result = run_git(ctx.source_dir, *args)
     if result.returncode != 0:
         ctx.log.warning("git %s failed: %s", args[0], redact(result.stderr.decode(errors="replace").strip()))
         raise ReviewloopError(
@@ -66,25 +60,26 @@ def _has_nul(ctx: RunContext, rev: str, path: str) -> bool:
     return b"\0" in head
 
 
-def _text_marked_binary(ctx: RunContext, fd: FileDiff, merge_base: str, head: str) -> bool:
+def _text_marked_binary(ctx: RunContext, fd: FileDiff, start: str, head: str) -> bool:
     """A file the diff calls binary although neither side's content is (a `-diff` attribute did it)."""
     if not fd.is_binary or fd.status == "deleted":
         return False
     if _has_nul(ctx, head, fd.path):
         return False
-    return fd.status == "added" or not _has_nul(ctx, merge_base, fd.old_path or fd.path)
+    return fd.status == "added" or not _has_nul(ctx, start, fd.old_path or fd.path)
 
 
-def _diff(ctx: RunContext, merge_base: str, head: str) -> list[FileDiff]:
-    """Diff with .gitattributes from the merge-base: the PR head must not hide its changes by marking them binary."""
+def _diff(ctx: RunContext, start: str, head: str, merge_base: str) -> list[FileDiff]:
+    """Diff `start..head` with .gitattributes from the merge-base: no PR commit may hide changes by marking them
+    binary, including the previous head a follow-up turn diffs from."""
     if attr_source_supported(ctx):
-        return parse_unified_diff(_git(ctx, f"--attr-source={merge_base}", *DIFF_ARGS, merge_base, head))
-    diffs = parse_unified_diff(_git(ctx, *DIFF_ARGS, merge_base, head))
-    hidden = [fd for fd in diffs if _text_marked_binary(ctx, fd, merge_base, head)]
+        return parse_unified_diff(_git(ctx, f"--attr-source={merge_base}", *DIFF_ARGS, start, head))
+    diffs = parse_unified_diff(_git(ctx, *DIFF_ARGS, start, head))
+    hidden = [fd for fd in diffs if _text_marked_binary(ctx, fd, start, head)]
     if not hidden:
         return diffs
     paths = sorted({p for fd in hidden for p in (fd.path, fd.old_path) if p})
-    forced = parse_unified_diff(_git(ctx, "--literal-pathspecs", *DIFF_ARGS, "--text", merge_base, head, "--", *paths))
+    forced = parse_unified_diff(_git(ctx, "--literal-pathspecs", *DIFF_ARGS, "--text", start, head, "--", *paths))
     by_path = {fd.path: fd for fd in forced}
     return [by_path.get(fd.path, fd) if fd in hidden else fd for fd in diffs]
 
@@ -110,17 +105,23 @@ def exclusion(fd: FileDiff, patterns: list[str]) -> str | None:
 
 
 class GetDiff:
-    """Diff `merge-base(base, head)..head` in the CI checkout and mark the files that are not reviewed."""
+    """Diff `merge-base(base, head)..head` in the CI checkout and mark the files that are not reviewed.
+
+    A follow-up turn diffs from the previous head instead, when force-push-and-lineage kept it as the base.
+    """
 
     id = "get-diff"
     group: str | None = None
 
     def run(self, ctx: RunContext) -> None:
         base, head = ctx.pr.base_sha, ctx.pr.head_sha
-        if not (_SHA.fullmatch(base) and _SHA.fullmatch(head)):
+        if not (is_sha(base) and is_sha(head)):
             raise ReviewloopError("get-diff: base and head must be hex commit SHAs")
         merge_base = _git(ctx, "merge-base", base, head).strip()
-        ctx.diffs = _diff(ctx, merge_base, head)
+        start = merge_base
+        if ctx.follow_up is not None and ctx.follow_up.diff_base is not None:
+            start = ctx.follow_up.diff_base
+        ctx.diffs = _diff(ctx, start, head, merge_base)
         ctx.excluded = []
         for fd in ctx.diffs:
             reason = exclusion(fd, ctx.config.paths.exclude)

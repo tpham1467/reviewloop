@@ -167,3 +167,26 @@ def test_opengrep_paths_follow_double_dash(monkeypatch: pytest.MonkeyPatch, tmp_
 def test_unknown_scanner_ignored(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     _installed(monkeypatch, "nope")
     assert run_scanners(["nope"], tmp_path, "a", "b", ["x"]) == []
+
+
+def test_scan_history_runs_gitleaks_on_the_range(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    from reviewloop.security.scanners import scan_history
+
+    _installed(monkeypatch, "gitleaks")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(scanners.subprocess, "run", _fake_run(calls, gitleaks=GITLEAKS_JSON))
+    out = scan_history(tmp_path, "base", "head")
+    assert out is not None and [f.rule for f in out] == ["github-pat"]
+    assert "--log-opts=base..head" in calls[0]
+    monkeypatch.setattr(scanners.subprocess, "run", _fake_run([], gitleaks=[]))
+    assert scan_history(tmp_path, "base", "head") == []
+
+
+def test_scan_history_unavailable_is_none(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    from reviewloop.security.scanners import scan_history
+
+    _installed(monkeypatch)
+    assert scan_history(tmp_path, "a", "b") is None
+    _installed(monkeypatch, "gitleaks")
+    monkeypatch.setattr(scanners.subprocess, "run", _fake_run([], returncode=2))
+    assert scan_history(tmp_path, "a", "b") is None
