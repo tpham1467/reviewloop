@@ -1,0 +1,1 @@
+{"iid":42,"title":"Add x","description":"body","source_branch":"feat","target_branch":"main","diff_refs":{"base_sha":"b1","start_sha":"s1","head_sha":"h1"},"author":{"id":7,"username":"alice"},"source_project_id":1,"target_project_id":2,"web_url":"https://gl.example/mr/42","draft":false}
