@@ -435,7 +435,8 @@ def test_security_branch_verifies_and_merges(make_ctx, monkeypatch) -> None:
         ScanFinding(tool="gitleaks", rule="aws", path="old.py", line=4, message="AWS key", in_history=True),
         ScanFinding(tool="opengrep", rule="sqli", path="app.py", line=2, message="SQL", in_history=False),
     ]
-    monkeypatch.setattr(security_branch, "run_scanners", lambda *a: hits)
+    scanned: list[tuple[object, ...]] = []
+    monkeypatch.setattr(security_branch, "run_scanners", lambda *a: scanned.append(a) or hits)
     sqli = finding(category="security", severity="high", text="SQL injection.", suggestion="x")
     weak = finding(category="security", severity="medium", text="Weak.", existing_code="    return y")
     review = {"findings": [sqli.model_dump(mode="json"), weak.model_dump(mode="json")], "coverage": []}
@@ -447,6 +448,8 @@ def test_security_branch_verifies_and_merges(make_ctx, monkeypatch) -> None:
 
     security_branch.SecurityBranch().run(ctx)
 
+    # gitleaks reads history from the checkout; opengrep scans the head copy.
+    assert scanned[0][1:3] == (ctx.source_dir, ctx.workdir / "sandbox-security")
     scan = json.loads((ctx.workdir / "sandbox-security" / ".reviewloop" / "security" / "scan.json").read_text())
     assert [h["rule"] for h in scan] == ["aws", "sqli"]
     history, kept = ctx.security_findings
@@ -668,12 +671,17 @@ def test_scanner_history_and_lineless_hits_are_forced_general(make_ctx, monkeypa
 def test_init_context_strips_checkout_credentials(make_ctx, pr_repo, run_git) -> None:
     from reviewloop.pipeline.steps.initial.init_context import InitContext
 
-    repo, _, _ = pr_repo
+    repo, base, head = pr_repo
     token = "glcbt-" + "x" * 20
     run_git(repo, "remote", "add", "origin", f"https://gitlab-ci-token:{token}@gitlab.example.com/g/p.git")
-    ctx = make_ctx(source_dir=repo, sandbox=False)
+    # The CI checkout is the base; the sandbox must still hold the PR head (ruling R80).
+    run_git(repo, "checkout", "-q", "--detach", base)
+    ctx = make_ctx(source_dir=repo, sandbox=False, base_sha=base, head_sha=head)
 
     InitContext().run(ctx)
+
+    assert run_git(ctx.sandbox, "rev-parse", "HEAD") == head
+    assert (ctx.sandbox / "poetry.lock").is_file()
 
     assert run_git(repo, "remote", "get-url", "origin") == "https://gitlab.example.com/g/p.git"
     assert token not in (repo / ".git" / "config").read_text()

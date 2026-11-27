@@ -112,8 +112,10 @@ def scan_history(workdir: Path, base_sha: str, head_sha: str) -> list[ScanFindin
 
 
 def run_scanners(
-    names: list[str], workdir: Path, base_sha: str, head_sha: str, changed_paths: list[str]
+    names: list[str], repo: Path, tree: Path, base_sha: str, head_sha: str, changed_paths: list[str]
 ) -> list[ScanFinding]:
+    """gitleaks reads `base_sha..head_sha` from the git history of `repo`; opengrep scans the files of `tree`, a copy
+    checked out at the PR head (the CI checkout `repo` may be the base branch)."""
     findings: list[ScanFinding] = []
     with tempfile.TemporaryDirectory(prefix="reviewloop-scan-") as tmp:
         for name in names:
@@ -124,12 +126,12 @@ def run_scanners(
                 log.info("%s not installed, skipped", name)
                 continue
             if name == "gitleaks":
-                findings += _gitleaks(workdir, base_sha, head_sha, tmp) or []
+                findings += _gitleaks(repo, base_sha, head_sha, tmp) or []
             else:
                 if not changed_paths:
                     log.info("opengrep skipped: no changed files")
                     continue
                 report = Path(tmp) / "opengrep.sarif"
                 cmd = ["opengrep", "scan", "--sarif", "--output", str(report), "--config", "auto", "--quiet"]
-                findings += _run([*cmd, "--", *changed_paths], workdir, report, _parse_sarif) or []
+                findings += _run([*cmd, "--", *changed_paths], tree, report, _parse_sarif) or []
     return findings

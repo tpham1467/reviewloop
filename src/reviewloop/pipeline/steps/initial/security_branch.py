@@ -61,10 +61,11 @@ class SecurityBranch:
         if not security.enabled or not reviewable:
             return
         paths = [fd.path for fd in reviewable]
-        hits = run_scanners(security.scanners, ctx.source_dir, ctx.pr.base_sha, ctx.pr.head_sha, paths)
+        sandbox = branch_sandbox(ctx, SECURITY_SANDBOX)
+        # The sandbox copy is at the PR head; scanned before the agent's snapshot, so scanner files cannot fail it.
+        hits = run_scanners(security.scanners, ctx.source_dir, sandbox, ctx.pr.base_sha, ctx.pr.head_sha, paths)
         forced = [forced_finding(h) for h in hits if h.in_history or h.line is None]
 
-        sandbox = branch_sandbox(ctx, SECURITY_SANDBOX)
         # Every hit is also a hint, so the agent can report it with quoted code and a fix.
         write_input(sandbox, "security/scan.json", json.dumps([asdict(h) for h in hits], indent=2))
         language = ctx.config.language

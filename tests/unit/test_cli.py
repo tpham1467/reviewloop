@@ -260,19 +260,20 @@ def test_logs_are_redacted(ci: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     assert "while parsing" in result.stderr
 
 
-def test_github_ignored_event_reads_no_pull_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # The adapter's constructor fetches the repository (PyGithub is not lazy); nothing else may be called.
+def test_github_ignored_event_makes_no_http_call(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The real PyGithub client, with its one HTTP entry point failing the test: an ignored event makes no request.
+    from github.Requester import Requester
+
     monkeypatch.chdir(tmp_path)
     event = tmp_path / "event.json"
     event.write_text(json.dumps({"action": "closed", "pull_request": {"number": 7}}))
     env = {**github_env(tmp_path), "RUNNER_TEMP": str(tmp_path)}
-    with patch("reviewloop.vcs.github.Github") as gh:
-        result = runner.invoke(cli.app, ["run"], env=env)
+    requests: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(Requester, "_Requester__requestRaw", lambda *a, **k: requests.append(a) or pytest.fail("HTTP"))
+    result = runner.invoke(cli.app, ["run"], env=env)
     assert result.exit_code == 0, result.stderr
     assert "ignored" in result.stderr
-    calls = [c[0] for c in gh.return_value.mock_calls]
-    assert calls == ["get_repo"]
-    assert gh.return_value.get_repo.return_value.mock_calls == []
+    assert requests == []
 
 
 def test_workdir_failure_exits_2_without_traceback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
