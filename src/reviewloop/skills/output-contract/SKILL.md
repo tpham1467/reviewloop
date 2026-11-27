@@ -49,6 +49,7 @@ Write all human-readable text (`text`, `reply`, `summary`, `markdown`, `analysis
 - Review (code-review, security-review):
   `{"findings": [Finding], "coverage": [{"path": str, "status": "reviewed" | "failed" | "excluded", "reason": str | null}]}`.
   `coverage` has one entry for every input file listed in the diff index, no more and no fewer. `reason` is required for `failed` and `excluded`.
+- Anchor repair: the review shape. `findings` has one entry per input finding, in input order; `coverage` has one entry per file in the input's `files` list. Set `existing_code` to `""` for a finding whose code you cannot find.
 - Quality gate: `{"analysis": str, "drop_ids": [int], "rewrites": {"<id>": str}}`, keys in that order.
 - Follow-up: `{"verdicts": [{"thread_id": str, "verdict": "fixed" | "not_fixed" | "valid_rebuttal" | "no_response", "reply": str}]}`.
 - Security verify: `{"analysis": str, "kept_ids": [int]}`, `analysis` first.

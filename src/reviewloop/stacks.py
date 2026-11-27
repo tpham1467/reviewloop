@@ -31,6 +31,11 @@ def _glob_regex(pattern: str) -> re.Pattern[str]:
     return re.compile("".join(out) + r"\Z")
 
 
+def glob_match(pattern: str, path: str) -> bool:
+    """Match a repository path against a glob where `**` spans directories and `*` stays inside one."""
+    return _glob_regex(pattern).match(path) is not None
+
+
 def _front_matter(path: Path) -> dict[str, object]:
     text = path.read_text(encoding="utf-8")
     _, header, _ = text.split("---", 2)
@@ -57,14 +62,20 @@ def _rule_specs() -> dict[str, tuple[Path, list[str], list[str]]]:
     return specs
 
 
+def _name_matches(base: str, name: str) -> bool:
+    return base.endswith(name) if name.startswith(".") else base == name
+
+
 def _detected(entry: str, manifests: dict[str, str]) -> bool:
     name, _, needle = entry.partition(":")
-    for rel, text in manifests.items():
-        base = PurePosixPath(rel).name
-        hit = base.endswith(name) if name.startswith(".") else base == name
-        if hit and needle in text:
-            return True
-    return False
+    return any(_name_matches(PurePosixPath(rel).name, name) and needle in text for rel, text in manifests.items())
+
+
+def is_manifest(path: str) -> bool:
+    """Whether a rule file's `detect` list names this file, so `detect_stacks` needs its content."""
+    base = PurePosixPath(path).name
+    names = {entry.partition(":")[0] for _, _, detect in _rule_specs().values() for entry in detect}
+    return any(_name_matches(base, name) for name in names)
 
 
 def detect_stacks(changed_paths: list[str], manifests: dict[str, str]) -> set[str]:
@@ -72,7 +83,7 @@ def detect_stacks(changed_paths: list[str], manifests: dict[str, str]) -> set[st
     for stack, (_, applies_to, detect) in _rule_specs().items():
         if stack == COMMON:
             continue
-        touched = any(_glob_regex(g).match(p) for g in applies_to for p in changed_paths)
+        touched = any(glob_match(g, p) for g in applies_to for p in changed_paths)
         if touched and any(_detected(d, manifests) for d in detect):
             stacks.add(stack)
     return stacks

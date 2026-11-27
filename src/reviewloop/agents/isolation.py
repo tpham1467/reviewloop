@@ -31,7 +31,7 @@ SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 AGENT_CONFIG_DIRS = (".claude", ".codex", ".cursor", ".agents/skills")
 AGENT_CONFIG_FILES = (".mcp.json", ".cursorrules", ".cursorignore", ".cursorindexingignore")
 # The runner's own git config could add hooks, an fsmonitor command or credentials, so none of it is read.
-_GIT_ENV = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"}
+GIT_ENV = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"}
 
 # CI checkout config that can carry a credential or run a command: an `http.<url>.extraHeader` (actions/checkout), a
 # credential helper, a URL rewrite, an included file, an askpass or ssh command. reviewloop never fetches, so all go.
@@ -58,7 +58,7 @@ def _real_git() -> str:
 
 
 def _git(cwd: Path, *args: str, stdin: str | None = None) -> str:
-    env = {**os.environ, **_GIT_ENV}
+    env = {**os.environ, **GIT_ENV}
     result = subprocess.run(  # noqa: S603
         [_real_git(), *args], cwd=cwd, env=env, input=stdin, capture_output=True, text=True, check=False
     )

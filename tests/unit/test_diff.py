@@ -204,3 +204,10 @@ def test_parse_ignores_preamble_before_first_file() -> None:
     )
     [fd] = parse_unified_diff(text)
     assert (fd.path, changed_new_lines(fd)) == ("a.py", {1})
+
+
+def test_changed_lines_counts_adds_and_deletes() -> None:
+    from reviewloop.diff import changed_lines
+
+    text = "--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n a\n-b\n+c\n--- a/y\n+++ b/y\n@@ -0,0 +1 @@\n+d\n"
+    assert changed_lines(parse_unified_diff(text)) == 3

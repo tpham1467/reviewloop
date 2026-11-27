@@ -202,6 +202,7 @@ class BitbucketCloudAdapter:
             author=_user(raw["author"]),
             is_fork=source["repository"]["full_name"] != dest["repository"]["full_name"],
             web_url=raw["links"]["html"]["href"],
+            draft=bool(raw.get("draft")),
         )
 
     def can_write(self, user: User) -> bool:
@@ -305,6 +306,10 @@ class BitbucketCloudAdapter:
             f"{self._comments_path()}/{int(existing['id'])}",
             data={"content": {"raw": body}},
         )
+
+    def summary_body(self) -> str | None:
+        existing = self._summary_comment(refresh=True)
+        return None if existing is None else str(existing["content"]["raw"])
 
     def suggestion_block(self, anchor: Anchor, code: str, replaced_lines: int = 1) -> str | None:
         return None

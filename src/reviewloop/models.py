@@ -30,6 +30,8 @@ class Finding(BaseModel):
     cause_code: str | None = None
     suggestion: str | None = None
     security: bool = False
+    # Set by Python only, for a scanner hit posted as a general thread that no agent step may drop (ruling R33).
+    forced: bool = False
 
 
 class Anchor(BaseModel):
@@ -57,6 +59,7 @@ class PullRequest(BaseModel):
     author: User
     is_fork: bool
     web_url: str
+    draft: bool = False
 
 
 class ThreadRef(BaseModel):

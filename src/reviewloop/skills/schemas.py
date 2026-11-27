@@ -24,17 +24,26 @@ CATEGORIES = frozenset(
 PROTECTED_CATEGORIES = frozenset({"api-contract", "concurrency", "authorization", "data-loss", "null-safety"})
 
 
+def _check_findings(findings: list[Finding]) -> None:
+    for n, finding in enumerate(findings):
+        if finding.category not in CATEGORIES:
+            allowed = ", ".join(sorted(CATEGORIES))
+            raise ValueError(f"unknown category {finding.category!r}; use one of: {allowed}")
+        if finding.forced:
+            raise ValueError(f"finding {n} sets a field reviewloop reserves; remove `forced`")
+
+
 class ReviewOutput(BaseModel):
     findings: list[Finding]
     coverage: list[FileCoverage]
 
     @field_validator("findings")
     @classmethod
-    def _known_categories(cls, findings: list[Finding]) -> list[Finding]:
-        for finding in findings:
-            if finding.category not in CATEGORIES:
-                allowed = ", ".join(sorted(CATEGORIES))
-                raise ValueError(f"unknown category {finding.category!r}; use one of: {allowed}")
+    def _valid_findings(cls, findings: list[Finding]) -> list[Finding]:
+        _check_findings(findings)
+        for n, finding in enumerate(findings):
+            if not finding.existing_code.strip():
+                raise ValueError(f"finding {n} has a blank existing_code; quote the code verbatim")
         return findings
 
     @field_validator("coverage")
@@ -44,6 +53,19 @@ class ReviewOutput(BaseModel):
             if entry.status != CoverageStatus.REVIEWED and not entry.reason:
                 raise ValueError(f"coverage for {entry.path!r} has status {entry.status.value} and needs a reason")
         return coverage
+
+
+class AnchorRepairOutput(BaseModel):
+    """The review shape for anchor repair; a blank quote is allowed and means the agent did not find the code."""
+
+    findings: list[Finding]
+    coverage: list[FileCoverage]
+
+    @field_validator("findings")
+    @classmethod
+    def _valid_findings(cls, findings: list[Finding]) -> list[Finding]:
+        _check_findings(findings)
+        return findings
 
 
 class GateOutput(BaseModel):

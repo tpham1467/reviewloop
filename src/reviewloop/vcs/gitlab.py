@@ -152,6 +152,8 @@ class GitLabAdapter:
             author=_user(mr.author),
             is_fork=mr.source_project_id != mr.target_project_id,
             web_url=mr.web_url,
+            # Older GitLab versions only send work_in_progress.
+            draft=bool(getattr(mr, "draft", False) or getattr(mr, "work_in_progress", False)),
         )
 
     def _pr_number(self) -> int | None:
@@ -257,6 +259,10 @@ class GitLabAdapter:
             return
         note.body = full
         note.save()
+
+    def summary_body(self) -> str | None:
+        note = self._summary_note(self._mr(self._pr_number()))
+        return None if note is None else str(note.body)
 
     def suggestion_block(self, anchor: Anchor, code: str, replaced_lines: int = 1) -> str | None:
         if anchor.side is not Side.NEW or not anchor.in_diff:

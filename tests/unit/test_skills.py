@@ -98,8 +98,10 @@ def test_output_contract_mentions_every_schema_field() -> None:
         schemas.Finding,
         schemas.FileCoverage,
     ]
-    missing = {f for m in models for f in m.model_fields if f != "id" and f"`{f}`" not in text}
+    internal = {"id", "forced"}
+    missing = {f for m in models for f in m.model_fields if f not in internal and f"`{f}`" not in text}
     assert not missing
+    assert "`forced`" not in text
 
 
 def test_output_contract_lists_categories() -> None:
@@ -166,3 +168,12 @@ def test_security_skills_agree_on_condition_classes() -> None:
     for name in ("security-review", "security-verify"):
         text = (SRC / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
         assert "TLS verification disabled" in text or "TLS verification" in text
+
+
+def test_glob_match_and_manifests() -> None:
+    from reviewloop.stacks import glob_match, is_manifest
+
+    assert glob_match("vendor/**", "vendor/a/b.php") and not glob_match("vendor/**", "src/vendor/a.php")
+    assert glob_match("**/*.min.js", "a.min.js") and glob_match("**/*.min.js", "web/x/a.min.js")
+    assert is_manifest("svc/composer.json") and is_manifest("src/App/App.csproj")
+    assert not is_manifest("src/app.py")

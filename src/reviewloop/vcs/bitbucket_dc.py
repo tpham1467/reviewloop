@@ -199,6 +199,7 @@ class BitbucketDCAdapter:
                 author=_user(raw["author"]["user"]),
                 is_fork=source["repository"]["id"] != target["repository"]["id"],
                 web_url=str(links[0].get("href", "")),
+                draft=bool(raw.get("draft")),
             )
         except (KeyError, TypeError, IndexError) as exc:
             raise ReviewloopError("Bitbucket returned an unexpected pull request shape") from exc
@@ -307,6 +308,10 @@ class BitbucketDCAdapter:
             self._create(full)
             return
         self._update(number, str(existing["id"]), text=clean_text(full))
+
+    def summary_body(self) -> str | None:
+        existing = self._summary_comment(self._pr_number())
+        return None if existing is None else str(existing.get("text", ""))
 
     def suggestion_block(self, anchor: Anchor, code: str, replaced_lines: int = 1) -> str | None:
         return None
