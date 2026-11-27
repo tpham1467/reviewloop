@@ -15,6 +15,7 @@ from pydantic import BaseModel, ValidationError
 from reviewloop.agents.base import AgentAdapter, AgentResult, AgentTask
 from reviewloop.agents.isolation import snapshot, verify_only_output_changed
 from reviewloop.errors import AgentStepError
+from reviewloop.output.redact import redact
 
 MAX_DETAIL = 2000
 MAX_PREVIOUS_OUTPUT = 20_000
@@ -112,7 +113,8 @@ def run_cli(task: AgentTask, argv: list[str], env: Mapping[str, str]) -> AgentRe
         finally:
             _kill_group(proc)
         stderr.seek(0)
-        err = stderr.read().decode(errors="replace").strip()[-STDERR_TAIL:]
+        # Redact the whole stream before cutting: a cut could split a token or key block so no pattern matches it.
+        err = redact(stderr.read().decode(errors="replace").strip())[-STDERR_TAIL:]
     duration = time.monotonic() - start
     try:
         verify_only_output_changed(before, snapshot(task.workdir), rel, transcript.relative_to(task.workdir))

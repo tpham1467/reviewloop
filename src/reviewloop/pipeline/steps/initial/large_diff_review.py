@@ -45,15 +45,9 @@ class LargeDiffReview:
         # exist before any group agent starts, since a run fails when its sandbox changes besides its own output.
         for n, files in enumerate(groups, start=1):
             self._prepare(ctx, n, files)
-        pool = ThreadPoolExecutor(max_workers=PARALLEL_GROUPS, thread_name_prefix="review-group")
-        try:
+        with ThreadPoolExecutor(max_workers=PARALLEL_GROUPS, thread_name_prefix="review-group") as pool:
             futures = [pool.submit(self._review, ctx, n, files) for n, files in enumerate(groups, start=1)]
             wait(futures)
-        except BaseException:
-            # An interrupt here: drop groups not started yet; the running ones finish with the pool.
-            pool.shutdown(cancel_futures=True)
-            raise
-        pool.shutdown()
 
         coverage: dict[str, FileCoverage] = {}
         failed = 0

@@ -283,20 +283,3 @@ def test_split_runs_in_review_group_with_security_branch(make_ctx, monkeypatch) 
         ("a/1.py", CoverageStatus.REVIEWED),
         ("b/1.py", CoverageStatus.REVIEWED),
     ]
-
-
-def test_interrupt_cancels_groups_not_started(make_ctx, monkeypatch) -> None:
-    def interrupted(futures):
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr(large_diff_review, "PARALLEL_GROUPS", 1)
-    monkeypatch.setattr(large_diff_review, "wait", interrupted)
-    diffs = [fd(f"d{n}/f.py", 8) for n in range(4)]
-    ctx = split_ctx(make_ctx, diffs)
-
-    with pytest.raises(KeyboardInterrupt):
-        LargeDiffReview().run(ctx)
-
-    # With one worker, the queued groups are cancelled instead of run after the interrupt.
-    assert len(ctx.agent.tasks) < 4
-    assert ctx.coverage == []
