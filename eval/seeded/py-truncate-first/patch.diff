@@ -1,0 +1,13 @@
+diff --git a/tool/store.py b/tool/store.py
+index 75e8108..03e6414 100644
+--- a/tool/store.py
++++ b/tool/store.py
+@@ -4,3 +4,8 @@ import json
+ def load(path):
+     with open(path) as fh:
+         return json.load(fh)
++
++
++def save(path, data):
++    with open(path, "w") as fh:
++        fh.write(json.dumps(data, default=str))

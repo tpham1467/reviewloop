@@ -1,0 +1,7 @@
+[
+  {
+    "path": "app/Console/Commands/PruneSessions.php",
+    "line": 16,
+    "category": "data-loss"
+  }
+]

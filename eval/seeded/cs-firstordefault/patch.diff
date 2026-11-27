@@ -1,0 +1,20 @@
+diff --git a/Catalog.cs b/Catalog.cs
+index c9d2b22..0a2dcc8 100644
+--- a/Catalog.cs
++++ b/Catalog.cs
+@@ -1,8 +1,15 @@
+ using System.Collections.Generic;
++using System.Linq;
+ 
+ public record Product(string Sku, string Name);
+ 
+ public class Catalog
+ {
+     private readonly List<Product> _items = new();
++
++    public string NameOf(string sku)
++    {
++        var product = _items.FirstOrDefault(p => p.Sku == sku);
++        return product.Name;
++    }
+ }

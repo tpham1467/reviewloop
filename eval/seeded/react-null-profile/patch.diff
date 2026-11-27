@@ -1,0 +1,14 @@
+diff --git a/src/Header.tsx b/src/Header.tsx
+index 20e2d4e..edee166 100644
+--- a/src/Header.tsx
++++ b/src/Header.tsx
+@@ -5,3 +5,9 @@ type Props = { name: string };
+ export function Header({ name }: Props) {
+   return <h1>{name}</h1>;
+ }
++
++type Account = { profile?: { avatarUrl: string } };
++
++export function Avatar({ account }: { account: Account }) {
++  return <img src={account.profile.avatarUrl} alt="avatar" />;
++}

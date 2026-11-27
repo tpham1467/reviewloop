@@ -1,0 +1,21 @@
+diff --git a/app/Console/Commands/PruneSessions.php b/app/Console/Commands/PruneSessions.php
+index ce94f7d..cba8e2a 100644
+--- a/app/Console/Commands/PruneSessions.php
++++ b/app/Console/Commands/PruneSessions.php
+@@ -3,8 +3,16 @@
+ namespace App\Console\Commands;
+ 
+ use Illuminate\Console\Command;
++use Illuminate\Support\Facades\DB;
+ 
+ class PruneSessions extends Command
+ {
+     protected $signature = 'sessions:prune';
++
++    public function handle(): void
++    {
++        $cutoff = now()->subDays(7)->timestamp;
++        DB::table('sessions')->where('last_activity', '<', $cutoff)->count();
++        DB::table('sessions')->delete();
++    }
+ }

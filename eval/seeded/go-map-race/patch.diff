@@ -1,0 +1,21 @@
+diff --git a/cache/cache.go b/cache/cache.go
+index 8681094..d939457 100644
+--- a/cache/cache.go
++++ b/cache/cache.go
+@@ -5,3 +5,16 @@ var items = map[string]string{}
+ func Get(k string) string {
+ 	return items[k]
+ }
++
++func Fill(keys []string) {
++	done := make(chan struct{})
++	for _, k := range keys {
++		go func(k string) {
++			items[k] = k + "!"
++			done <- struct{}{}
++		}(k)
++	}
++	for range keys {
++		<-done
++	}
++}

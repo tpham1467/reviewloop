@@ -1,0 +1,14 @@
+diff --git a/notes/tasks.py b/notes/tasks.py
+index 90cea87..0429667 100644
+--- a/notes/tasks.py
++++ b/notes/tasks.py
+@@ -13,3 +13,9 @@ def cutoff():
+ 
+ def count():
+     return Note.objects.count()
++
++
++def purge_old_drafts():
++    stale = Note.objects.filter(updated__lt=cutoff())
++    Note.objects.all().delete()
++    return stale.count()

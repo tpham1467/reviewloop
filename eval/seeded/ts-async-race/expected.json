@@ -1,0 +1,7 @@
+[
+  {
+    "path": "src/counter.ts",
+    "line": 10,
+    "category": "concurrency"
+  }
+]

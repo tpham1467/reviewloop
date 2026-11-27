@@ -1,0 +1,15 @@
+diff --git a/app/Http/Controllers/InvoiceController.php b/app/Http/Controllers/InvoiceController.php
+index cb8eabb..8f6cf29 100644
+--- a/app/Http/Controllers/InvoiceController.php
++++ b/app/Http/Controllers/InvoiceController.php
+@@ -11,4 +11,10 @@ class InvoiceController extends Controller
+         $this->authorize('view', $invoice);
+         return response()->json($invoice);
+     }
++
++    public function destroy(Invoice $invoice)
++    {
++        $invoice->delete();
++        return response()->noContent();
++    }
+ }

@@ -1,0 +1,22 @@
+diff --git a/src/dto/user.dto.ts b/src/dto/user.dto.ts
+index 300e2a4..4694605 100644
+--- a/src/dto/user.dto.ts
++++ b/src/dto/user.dto.ts
+@@ -1,4 +1,4 @@
+ export class UserDto {
+   id: string;
+-  fullName: string;
++  name: string;
+ }
+diff --git a/src/users.controller.ts b/src/users.controller.ts
+index cb73cf6..e3ad14d 100644
+--- a/src/users.controller.ts
++++ b/src/users.controller.ts
+@@ -5,6 +5,6 @@ import { UserDto } from './dto/user.dto';
+ export class UsersController {
+   @Get('me')
+   me(): UserDto {
+-    return { id: '1', fullName: 'Ada Lovelace' };
++    return { id: '1', name: 'Ada Lovelace' };
+   }
+ }
