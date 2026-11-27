@@ -1567,7 +1567,7 @@ wheels = [
 ]
 
 [[package]]
-name = "reviewloop"
+name = "reviewloop-ai"
 version = "0.0.0"
 source = { editable = "." }
 dependencies = [
