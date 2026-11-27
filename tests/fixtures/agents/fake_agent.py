@@ -2,7 +2,8 @@
 """Stand-in for an agent CLI in tests.
 
 Reads the prompt from stdin and its behaviour from `.reviewloop/fake-agent.json` in the working directory (the
-sandbox), because the adapter scrubs the environment. Finds its output path in argv (`.reviewloop/out/<step>.json`).
+sandbox), because the adapter scrubs the environment. Finds its output path in argv (`.reviewloop/out/<step>.json`),
+or in the config's `out` key for a CLI whose argv does not name the output file.
 """
 
 import json
@@ -23,12 +24,12 @@ def spawn_grandchild() -> None:
 
 def main() -> int:
     prompt = sys.stdin.read()
+    config = json.loads(Path(".reviewloop/fake-agent.json").read_text())
     match = re.search(r"\.reviewloop/out/[\w.-]+\.json", " ".join(sys.argv[1:]))
-    if match is None:
+    if match is None and "out" not in config:
         print("fake agent: no output path in argv", file=sys.stderr)
         return 3
-    out = Path(match.group(0))
-    config = json.loads(Path(".reviewloop/fake-agent.json").read_text())
+    out = Path(match.group(0) if match else config["out"])
     mode = config.get("mode", "good")
     print(json.dumps({"type": "system", "subtype": "init", "mode": mode}))
     good = json.dumps(config.get("output", {}))
@@ -56,6 +57,14 @@ def main() -> int:
     elif mode == "git":
         probe = subprocess.run(["git", "--version"], capture_output=True, text=True, check=False)  # noqa: S607
         out.write_text(json.dumps({"message": probe.stderr.strip(), "count": probe.returncode}))
+    elif mode == "home":
+        home = Path(os.environ["HOME"])
+        files = {
+            p.relative_to(home).as_posix(): {"mode": f"{p.stat().st_mode & 0o777:o}", "text": p.read_text()}
+            for p in sorted(home.rglob("*"))
+            if p.is_file() and p.parent != home / "bin"
+        }
+        out.write_text(json.dumps({"files": files}))
     elif mode == "settings":
         settings = Path(os.environ["HOME"]) / ".claude" / "settings.json"
         out.write_text(json.dumps({"settings": json.loads(settings.read_text())}))
