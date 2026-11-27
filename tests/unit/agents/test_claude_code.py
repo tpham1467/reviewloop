@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from reviewloop.agents import claude_code
+from reviewloop.agents import isolation
 from reviewloop.agents.claude_code import ClaudeCodeAdapter
 from reviewloop.errors import AgentStepError
 
@@ -130,7 +130,7 @@ def test_run_scrubs_env_and_uses_fresh_home(
     skills = tmp_path / "skills"
     (skills / "code-review").mkdir(parents=True)
     (skills / "code-review" / "SKILL.md").write_text("---\nname: code-review\n---\nbody\n")
-    monkeypatch.setattr(claude_code, "SKILLS_DIR", skills)
+    monkeypatch.setattr(isolation, "SKILLS_DIR", skills)
     task = make_task(mode="env").model_copy(update={"output_schema": EnvDump, "skills": ["code-review"]})
 
     result = ClaudeCodeAdapter(binary=fake_agent).run(task)
@@ -160,7 +160,7 @@ def test_run_writes_hardened_settings_in_home(fake_agent: str, make_task) -> Non
 
 
 def test_run_unknown_skill_fails(fake_agent: str, make_task, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(claude_code, "SKILLS_DIR", tmp_path / "skills")
+    monkeypatch.setattr(isolation, "SKILLS_DIR", tmp_path / "skills")
     task = make_task().model_copy(update={"skills": ["nope"]})
 
     with pytest.raises(AgentStepError, match="nope"):

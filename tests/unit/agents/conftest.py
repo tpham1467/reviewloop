@@ -50,7 +50,12 @@ def make_task(tmp_path: Path):
     ) -> AgentTask:
         workdir = tmp_path / "sandbox"
         (workdir / ".reviewloop" / "out").mkdir(parents=True, exist_ok=True)
-        payload = {"mode": mode, "output": output if output is not None else {"message": "ok", "count": 2}, **extra}
+        payload = {
+            "mode": mode,
+            "output": output if output is not None else {"message": "ok", "count": 2},
+            "out": f".reviewloop/out/{step}.json",
+            **extra,
+        }
         (workdir / ".reviewloop" / "fake-agent.json").write_text(json.dumps(payload))
         return AgentTask(
             step=step,

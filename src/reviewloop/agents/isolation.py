@@ -21,12 +21,26 @@ from reviewloop.errors import AgentStepError
 
 BASE_ENV = ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR")
 GIT_INDEX = ".git/index"
-# Agent configuration a PR can commit: project skills, settings, hooks, subagents, commands and MCP servers. Removed
-# from the copy so the CLI never loads them; AGENTS.md and CLAUDE.md stay, they are data the review may read.
-AGENT_CONFIG_DIRS = (".claude",)
-AGENT_CONFIG_FILES = (".mcp.json",)
+SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
+# Agent configuration a PR can commit: project skills, settings, permissions, hooks, rules, subagents, commands and MCP
+# servers of Claude Code (`.claude/`, `.mcp.json`), Codex (`.codex/`, `.agents/skills`) and Cursor (`.cursor/` with
+# cli.json, permissions.json, sandbox.json, hooks.json, mcp.json, rules and skills; `.cursorrules`). `.cursorignore`
+# would hide files from the review. All are removed from the copy so no CLI loads them; AGENTS.md and CLAUDE.md stay,
+# they are data the review may read. An entry with a `/` (`.agents/skills`) is removed only at that path, under any
+# directory; the rest of its parent stays.
+AGENT_CONFIG_DIRS = (".claude", ".codex", ".cursor", ".agents/skills")
+AGENT_CONFIG_FILES = (".mcp.json", ".cursorrules", ".cursorignore", ".cursorindexingignore")
 # The runner's own git config could add hooks, an fsmonitor command or credentials, so none of it is read.
 _GIT_ENV = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"}
+
+# CI checkout config that can carry a credential or run a command: an `http.<url>.extraHeader` (actions/checkout), a
+# credential helper, a URL rewrite, an included file, an askpass or ssh command. reviewloop never fetches, so all go.
+_CHECKOUT_CREDENTIAL_CONFIG = re.compile(
+    r"^(credential\..*|http\.(.*\.)?extraheader|url\..*\.(push)?insteadof|include\..*|includeif\..*"
+    r"|core\.(askpass|sshcommand))$"
+)
+# Values that are URLs, where only the userinfo is a credential: the host and path stay.
+_URL_VALUE = re.compile(r"^(remote\..+\.(url|pushurl|proxy)|http\.(.+\.)?proxy)$")
 
 # Config that can carry a credential, load another config file or run a command. A fresh clone does not copy the
 # source's config, but a `config` file in a git template dir does land in the clone, so strip it.
@@ -62,6 +76,57 @@ def _strip_config(repo: Path) -> None:
             _git(repo, "config", "--local", "--unset-all", key)
 
 
+def _without_userinfo(url: str) -> str:
+    """`url` without `user[:password]@`, for URLs with a scheme and for bare `user:pass@host:port` proxy values."""
+    scheme, sep, rest = url.partition("://")
+    if not sep:
+        scheme, rest = "", url
+    authority, slash, path = rest.partition("/")
+    if "@" not in authority:
+        return url
+    return f"{scheme}{sep}{authority.rsplit('@', 1)[1]}{slash}{path}"
+
+
+def _strip_credentials(repo: Path, where: list[str]) -> None:
+    """Apply the checkout credential rules to one config file, `where` being `--local` or `--file <path>`."""
+    listing = _git(repo, "config", *where, "--no-includes", "--name-only", "--list")
+    removed: set[str] = set()
+    for key in sorted(set(listing.split())):
+        section, _, rest = key.partition(".")
+        subsection = rest.rpartition(".")[0]
+        if section.lower() in ("url", "http") and subsection and _without_userinfo(subsection) != subsection:
+            # The credential is in the section name (`[url "https://x:tok@host/"]`), which outlives its keys.
+            name = f"{section}.{subsection}"
+            if name not in removed:
+                removed.add(name)
+                _git(repo, "config", *where, "--remove-section", name)
+        elif _URL_VALUE.match(key.lower()):
+            values = _git(repo, "config", *where, "--no-includes", "--get-all", key).splitlines()
+            _git(repo, "config", *where, "--unset-all", key)
+            for value in values:
+                _git(repo, "config", *where, "--add", key, _without_userinfo(value))
+        elif _CHECKOUT_CREDENTIAL_CONFIG.match(key.lower()):
+            _git(repo, "config", *where, "--unset-all", key)
+
+
+def strip_checkout_credentials(source: Path) -> None:
+    """Remove git credentials from the CI job's own checkout `source` (ruling R31). The init step calls it before the
+    first agent run.
+
+    GitLab Runner keeps `gitlab-ci-token:<CI_JOB_TOKEN>@` in the `origin` URL and actions/checkout persists an
+    `http.<url>.extraheader`; an agent able to read an absolute path could read either. reviewloop talks to the VCS
+    through API tokens and never fetches or pushes after checkout, so the job's ephemeral checkout does not need them.
+    URL values (remote URLs, proxies) keep their host and path; only the userinfo goes. Submodule gitdirs under
+    `.git/modules/` get the same treatment.
+    """
+    _strip_credentials(source, ["--local"])
+    modules = source / ".git" / "modules"
+    for root, _dirs, files in os.walk(modules):
+        # A submodule gitdir has its own HEAD; a `config` file elsewhere (a ref named `config`) is not a git config.
+        if "config" in files and "HEAD" in files:
+            _strip_credentials(source, ["--file", str(Path(root) / "config")])
+
+
 def _remove(path: Path) -> None:
     if path.is_dir() and not path.is_symlink():
         shutil.rmtree(path)
@@ -82,6 +147,11 @@ def _clean_tree(dest: Path) -> None:
             if path.is_symlink():
                 links.append(path.relative_to(dest).as_posix())
             elif name in AGENT_CONFIG_DIRS or name in AGENT_CONFIG_FILES:
+                removed.append(path.relative_to(dest).as_posix())
+                _remove(path)
+        for nested in (c for c in AGENT_CONFIG_DIRS if "/" in c):
+            path = here / nested
+            if path.is_dir() and not path.is_symlink() and not (here / nested.split("/")[0]).is_symlink():
                 removed.append(path.relative_to(dest).as_posix())
                 _remove(path)
         dirs[:] = [d for d in dirs if not (here / d).is_symlink() and d not in AGENT_CONFIG_DIRS]
@@ -139,6 +209,15 @@ def install_git_wrapper(home: Path, root: Path) -> Path:
     script.write_text(f"#!{sys.executable} -I\n{source}{entry}")
     script.chmod(0o755)
     return bin_dir
+
+
+def install_skills(step: str, skills: Iterable[str], dest: Path) -> None:
+    """Copy each bundled skill `src/reviewloop/skills/<name>/` to `dest/<name>/` in the agent's throwaway HOME."""
+    for skill in skills:
+        source = SKILLS_DIR / skill
+        if not (source / "SKILL.md").is_file():
+            raise AgentStepError(f"step '{step}': unknown skill {skill!r}")
+        shutil.copytree(source, dest / skill)
 
 
 def scrub_env(allowed: Iterable[str]) -> dict[str, str]:

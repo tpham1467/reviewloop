@@ -15,16 +15,13 @@ The real-CLI smoke run must confirm that `/usr/bin/git diff a /abs/x` is refused
 import json
 import os
 import shlex
-import shutil
 import tempfile
 from pathlib import Path
 
 from reviewloop.agents.base import AgentResult, AgentTask
-from reviewloop.agents.isolation import install_git_wrapper, scrub_env
+from reviewloop.agents.isolation import install_git_wrapper, install_skills, scrub_env
 from reviewloop.agents.runner import output_path, run_cli
 from reviewloop.errors import AgentStepError
-
-SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 
 # Model credentials only. `ANTHROPIC_*` also covers gateway settings such as ANTHROPIC_BASE_URL and
 # ANTHROPIC_VERTEX_PROJECT_ID. Cloud credentials pass only when their provider is selected, so a runner's AWS or
@@ -149,11 +146,7 @@ class ClaudeCodeAdapter:
         argv = self.command(task)
         with tempfile.TemporaryDirectory(prefix="reviewloop-home-") as home:
             config = Path(home) / ".claude"
-            for skill in task.skills:
-                source = SKILLS_DIR / skill
-                if not (source / "SKILL.md").is_file():
-                    raise AgentStepError(f"step '{task.step}': unknown skill {skill!r}")
-                shutil.copytree(source, config / "skills" / skill)
+            install_skills(task.step, task.skills, config / "skills")
             config.mkdir(exist_ok=True)
             (config / "settings.json").write_text(json.dumps(SETTINGS))
             bin_dir = install_git_wrapper(Path(home), task.workdir)
