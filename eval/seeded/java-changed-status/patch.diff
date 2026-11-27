@@ -1,0 +1,12 @@
+diff --git a/src/main/java/shop/OrderController.java b/src/main/java/shop/OrderController.java
+index 45f5186..f2ac47e 100644
+--- a/src/main/java/shop/OrderController.java
++++ b/src/main/java/shop/OrderController.java
+@@ -8,6 +8,6 @@ import org.springframework.web.bind.annotation.RestController;
+ public class OrderController {
+     @PostMapping("/orders")
+     public ResponseEntity<String> create() {
+-        return ResponseEntity.status(201).body("created");
++        return ResponseEntity.ok("created");
+     }
+ }

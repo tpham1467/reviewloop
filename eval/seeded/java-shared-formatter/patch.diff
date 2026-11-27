@@ -1,0 +1,19 @@
+diff --git a/src/main/java/shop/Dates.java b/src/main/java/shop/Dates.java
+index 14f7dfd..5a1c2ba 100644
+--- a/src/main/java/shop/Dates.java
++++ b/src/main/java/shop/Dates.java
+@@ -1,5 +1,14 @@
+ package shop;
+ 
++import java.text.SimpleDateFormat;
++import java.util.Date;
++
+ public final class Dates {
++    private static final SimpleDateFormat FORMAT = new SimpleDateFormat("yyyy-MM-dd");
++
+     private Dates() {}
++
++    public static String format(Date d) {
++        return FORMAT.format(d);
++    }
+ }

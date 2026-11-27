@@ -1,0 +1,20 @@
+diff --git a/src/orders.controller.ts b/src/orders.controller.ts
+index 735a573..fa59c3b 100644
+--- a/src/orders.controller.ts
++++ b/src/orders.controller.ts
+@@ -1,4 +1,4 @@
+-import { Controller, Get, Param, UseGuards } from '@nestjs/common';
++import { Controller, Delete, Get, Param, UseGuards } from '@nestjs/common';
+ import { AuthGuard } from './auth.guard';
+ import { OrdersService } from './orders.service';
+ 
+@@ -11,4 +11,9 @@ export class OrdersController {
+   find(@Param('id') id: string) {
+     return this.orders.find(id);
+   }
++
++  @Delete(':id')
++  remove(@Param('id') id: string) {
++    return this.orders.remove(id);
++  }
+ }

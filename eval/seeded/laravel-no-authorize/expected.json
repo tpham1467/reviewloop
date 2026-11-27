@@ -1,0 +1,7 @@
+[
+  {
+    "path": "app/Http/Controllers/InvoiceController.php",
+    "line": 17,
+    "category": "authorization"
+  }
+]

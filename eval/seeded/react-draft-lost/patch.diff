@@ -1,0 +1,20 @@
+diff --git a/src/Editor.tsx b/src/Editor.tsx
+index adc4eee..a7e306a 100644
+--- a/src/Editor.tsx
++++ b/src/Editor.tsx
+@@ -2,5 +2,14 @@ import React, { useState } from 'react';
+ 
+ export function Editor({ save }: { save: (text: string) => Promise<void> }) {
+   const [text, setText] = useState('');
+-  return <textarea value={text} onChange={(e) => setText(e.target.value)} />;
++  async function onSave() {
++    setText('');
++    await save(text);
++  }
++  return (
++    <div>
++      <textarea value={text} onChange={(e) => setText(e.target.value)} />
++      <button onClick={onSave}>Save</button>
++    </div>
++  );
+ }

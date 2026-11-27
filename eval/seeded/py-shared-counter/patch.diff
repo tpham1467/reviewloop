@@ -1,0 +1,23 @@
+diff --git a/tool/stats.py b/tool/stats.py
+index a45e1d2..90df29e 100644
+--- a/tool/stats.py
++++ b/tool/stats.py
+@@ -1 +1,18 @@
++import threading
++
+ hits = 0
++
++
++def bump(n):
++    global hits
++    for _ in range(n):
++        hits += 1
++
++
++def run(workers):
++    threads = [threading.Thread(target=bump, args=(1000,)) for _ in range(workers)]
++    for t in threads:
++        t.start()
++    for t in threads:
++        t.join()
++    return hits

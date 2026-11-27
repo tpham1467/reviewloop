@@ -1,0 +1,14 @@
+diff --git a/notes/views.py b/notes/views.py
+index 7537d27..542ea0b 100644
+--- a/notes/views.py
++++ b/notes/views.py
+@@ -8,3 +8,9 @@ from .models import Note
+ def list_notes(request):
+     rows = Note.objects.filter(owner=request.user)
+     return JsonResponse({"notes": [n.title for n in rows]})
++
++
++@login_required
++def note_detail(request, pk):
++    note = Note.objects.get(pk=pk)
++    return JsonResponse({"title": note.title, "body": note.body})

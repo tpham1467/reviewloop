@@ -1,0 +1,15 @@
+diff --git a/src/Repo.php b/src/Repo.php
+index 14bdb86..4ae7282 100644
+--- a/src/Repo.php
++++ b/src/Repo.php
+@@ -10,4 +10,10 @@ class Repo
+     {
+         return $this->rows[$id] ?? null;
+     }
++
++    public function emailOf(int $id): string
++    {
++        $row = $this->find($id);
++        return strtolower($row['email']);
++    }
+ }

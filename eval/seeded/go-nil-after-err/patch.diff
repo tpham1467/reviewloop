@@ -1,0 +1,23 @@
+diff --git a/fetch/fetch.go b/fetch/fetch.go
+index 39f9e06..58d5fc8 100644
+--- a/fetch/fetch.go
++++ b/fetch/fetch.go
+@@ -1,5 +1,17 @@
+ package fetch
+ 
+-import "net/http"
++import (
++	"io"
++	"net/http"
++)
+ 
+ var client = &http.Client{}
++
++func Body(url string) ([]byte, error) {
++	resp, err := client.Get(url)
++	defer resp.Body.Close()
++	if err != nil {
++		return nil, err
++	}
++	return io.ReadAll(resp.Body)
++}

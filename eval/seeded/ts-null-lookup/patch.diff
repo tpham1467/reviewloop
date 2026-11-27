@@ -1,0 +1,13 @@
+diff --git a/src/users.ts b/src/users.ts
+index 5b41857..fbd4c9a 100644
+--- a/src/users.ts
++++ b/src/users.ts
+@@ -5,3 +5,8 @@ const users = new Map<string, User>();
+ export function add(u: User): void {
+   users.set(u.id, u);
+ }
++
++export function domainOf(id: string): string {
++  const user = users.get(id);
++  return user.email.split('@')[1];
++}

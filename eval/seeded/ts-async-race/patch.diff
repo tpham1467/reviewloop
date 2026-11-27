@@ -1,0 +1,14 @@
+diff --git a/src/counter.ts b/src/counter.ts
+index ddaaa12..edeeeee 100644
+--- a/src/counter.ts
++++ b/src/counter.ts
+@@ -3,3 +3,9 @@ let total = 0;
+ export function current(): number {
+   return total;
+ }
++
++export async function addFromRemote(fetchDelta: () => Promise<number>): Promise<void> {
++  const before = total;
++  const delta = await fetchDelta();
++  total = before + delta;
++}

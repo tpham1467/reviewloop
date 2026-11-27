@@ -1,0 +1,19 @@
+diff --git a/Sessions.cs b/Sessions.cs
+index 097cd10..0b16c7c 100644
+--- a/Sessions.cs
++++ b/Sessions.cs
+@@ -1,6 +1,14 @@
+ using System;
++using System.Collections.Generic;
+ 
+ public static class Sessions
+ {
++    private static readonly Dictionary<string, DateTime> Seen = new();
++
+     public static string NewId() => Guid.NewGuid().ToString();
++
++    public static void Touch(string id)
++    {
++        Seen[id] = DateTime.UtcNow;
++    }
+ }
