@@ -1,0 +1,67 @@
+site_name: reviewloop
+site_description: AI code review in your own CI with your own agent CLI.
+site_url: https://tpham1467.github.io/reviewloop/
+repo_url: https://github.com/tpham1467/reviewloop
+repo_name: tpham1467/reviewloop
+edit_uri: edit/main/docs/
+copyright: reviewloop is licensed under AGPL-3.0-only.
+
+theme:
+  name: material
+  features:
+    - content.code.copy
+    - navigation.sections
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+# Design specs and implementation plans are working documents, not user docs.
+exclude_docs: |
+  specs/
+  plans/
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+  links:
+    not_found: warn
+    anchors: warn
+    absolute_links: info
+    unrecognized_links: warn
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - GitHub: getting-started/github.md
+      - GitLab: getting-started/gitlab.md
+      - Bitbucket Cloud: getting-started/bitbucket-cloud.md
+      - Bitbucket Data Center with Jenkins: getting-started/bitbucket-dc-jenkins.md
+  - Configuration: configuration.md
+  - Agents:
+      - Claude Code: agents/claude-code.md
+      - Codex (experimental): agents/codex.md
+      - Cursor (experimental): agents/cursor.md
+  - Security: security.md
+  - FAQ: faq.md
+  - Architecture decisions:
+      - "0001: Record architecture decisions": adr/0001-record-architecture-decisions.md
+      - "0002: Agent tool restriction": adr/0002-agent-tool-restriction.md
