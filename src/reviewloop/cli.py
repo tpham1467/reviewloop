@@ -3,11 +3,13 @@
 import logging
 import os
 import shutil
+import signal
 import sys
 import tempfile
 from collections.abc import Mapping
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from types import FrameType
 from typing import Annotated
 
 import typer
@@ -33,8 +35,8 @@ INFRA_ERROR = 2
 HANDLER_NAME = "reviewloop-cli"
 # Steps after which the run's findings are final enough to publish as artifacts.
 POSTING_STEPS = frozenset({"post-comment", "post-follow-up-comments"})
-# A distribution rename is pending; either name is this package.
-DISTRIBUTIONS = ("reviewloop-ai", "reviewloop")
+# The distribution name (ruling R70); `reviewloop` on PyPI is another project, so it is never looked up.
+DISTRIBUTION = "reviewloop-ai"
 HELP_TEXT = """\
 reviewloop commands (write access required), posted as a pull request comment:
 
@@ -44,7 +46,14 @@ reviewloop commands (write access required), posted as a pull request comment:
 """
 
 log = logging.getLogger("reviewloop")
-app = typer.Typer(no_args_is_help=True, add_completion=False, help="AI code review in your own CI.")
+# Pretty exceptions off: with show_locals (the default before Typer 0.23) a crash would print `os.environ`.
+app = typer.Typer(
+    no_args_is_help=True,
+    add_completion=False,
+    help="AI code review in your own CI.",
+    pretty_exceptions_enable=False,
+    pretty_exceptions_show_locals=False,
+)
 
 OutputDir = Annotated[Path, typer.Option("--output-dir", help="Where to write reviewloop.json and reviewloop.sarif.")]
 PrNumber = Annotated[int, typer.Option("--pr", min=1, help="Pull request number.")]
@@ -54,7 +63,11 @@ class _Redact(logging.Filter):
     """Every log line leaves through `redact`, including tracebacks."""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        record.msg = redact(record.getMessage())
+        try:
+            message = record.getMessage()
+        except (TypeError, ValueError):  # a bad `%` call in some library must not break logging
+            message = str(record.msg)
+        record.msg = redact(message)
         record.args = None
         if record.exc_info:
             record.exc_text = redact(logging.Formatter().formatException(record.exc_info))
@@ -64,15 +77,23 @@ class _Redact(logging.Filter):
 
 
 def _setup_logging() -> None:
+    """One redacting handler on the root logger: reviewloop's records at INFO, third-party libraries' at WARNING."""
+    root = logging.getLogger()
     # A second run in one process (tests) replaces the handler, so it writes to the current stderr.
-    for handler in [h for h in log.handlers if h.get_name() == HANDLER_NAME]:
-        log.removeHandler(handler)
+    for old in [h for h in root.handlers if h.get_name() == HANDLER_NAME]:
+        root.removeHandler(old)
     handler = logging.StreamHandler(sys.stderr)
     handler.set_name(HANDLER_NAME)
     handler.addFilter(_Redact())
-    handler.setFormatter(logging.Formatter("reviewloop %(levelname)s %(message)s"))
-    log.addHandler(handler)
+    handler.setFormatter(logging.Formatter("reviewloop %(levelname)s %(name)s: %(message)s"))
+    root.addHandler(handler)
+    root.setLevel(logging.WARNING)
     log.setLevel(logging.INFO)
+
+
+def _terminate(signum: int, frame: FrameType | None) -> None:
+    # CI cancels a job with SIGTERM; as an interrupt it unwinds through the clean step and the workdir removal.
+    raise KeyboardInterrupt
 
 
 class _Tracked:
@@ -90,12 +111,10 @@ class _Tracked:
 
 
 def package_version() -> str:
-    for name in DISTRIBUTIONS:
-        try:
-            return version(name)
-        except PackageNotFoundError:
-            continue
-    return __version__
+    try:
+        return version(DISTRIBUTION)
+    except PackageNotFoundError:
+        return __version__
 
 
 def _write_artifacts(ctx: RunContext, output_dir: Path) -> None:
@@ -136,28 +155,41 @@ def _dispatch(env: Mapping[str, str], workdir: Path, output_dir: Path, manual: t
     started: set[str] = set()
     try:
         run_flow([_Tracked(step, started) for step in steps], ctx)
-    finally:
+    except BaseException:
         if started & POSTING_STEPS:
-            _write_artifacts(ctx, output_dir)
+            try:
+                _write_artifacts(ctx, output_dir)
+            except Exception as exc:
+                # The flow's error is the one to report.
+                log.error("could not write artifacts (%s)", type(exc).__name__)
+        raise
+    if started & POSTING_STEPS:
+        _write_artifacts(ctx, output_dir)
     return exit_code(ctx.findings, ctx.coverage, ctx.config.fail_on)
 
 
 def _execute(output_dir: Path, manual: tuple[Command, int] | None = None) -> None:
     _setup_logging()
-    env = dict(os.environ)
-    base = env.get("RUNNER_TEMP") or env.get("CI_BUILDS_DIR") or None
-    workdir = Path(tempfile.mkdtemp(prefix="reviewloop-", dir=base))
+    previous = signal.signal(signal.SIGTERM, _terminate)
+    workdir: Path | None = None
     try:
+        env = dict(os.environ)
+        base = env.get("RUNNER_TEMP") or env.get("CI_BUILDS_DIR") or None
+        workdir = Path(tempfile.mkdtemp(prefix="reviewloop-", dir=base))
         code = _dispatch(env, workdir, output_dir, manual)
     except ReviewloopError as exc:  # AgentStepError and ConfigError too
         log.error("%s", exc)
+        code = INFRA_ERROR
+    except KeyboardInterrupt:
+        log.error("interrupted")
         code = INFRA_ERROR
     except Exception as exc:
         # The message may carry a token or a response body; the type is enough to report.
         log.error("unexpected error (%s)", type(exc).__name__)
         code = INFRA_ERROR
     finally:
-        if env.get(KEEP_ENV) != "1":
+        signal.signal(signal.SIGTERM, previous)
+        if workdir is not None and os.environ.get(KEEP_ENV) != "1":
             shutil.rmtree(workdir, ignore_errors=True)
     raise typer.Exit(code)
 

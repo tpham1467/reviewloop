@@ -14,20 +14,30 @@ permissions:
   contents: read
   issues: write
   pull-requests: write
-concurrency:
-  group: reviewloop-${{ github.event.pull_request.number || github.event.issue.number }}
-  cancel-in-progress: true
 jobs:
   review:
     if: >-
       github.event_name == 'pull_request' ||
       (github.event.issue.pull_request && startsWith(github.event.comment.body, '/reviewloop'))
+    # Job level, after `if`: a comment that is not a command must not cancel a running review.
+    concurrency:
+      group: reviewloop-${{ github.event.pull_request.number || github.event.issue.number }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
           fetch-depth: 0
+      # The PR head as objects only; the token is passed to this one command, never stored in .git/config.
+      - name: Fetch the pull request head
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic
+          $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          fetch --no-tags origin "refs/pull/${PR_NUMBER}/head"
       - uses: tpham1467/reviewloop@v0
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -46,7 +56,14 @@ reviewloop:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_PIPELINE_SOURCE == "trigger"
   script:
+    # The MR number: CI_MERGE_REQUEST_IID in MR pipelines, the comment webhook payload in trigger pipelines.
+    - >-
+      MR_IID="${CI_MERGE_REQUEST_IID:-$(python3 -c 'import json, os, pathlib;
+      p = os.environ.get("TRIGGER_PAYLOAD", "");
+      t = pathlib.Path(p).read_text() if os.path.isfile(p) else p;
+      print(int(json.loads(t)["merge_request"]["iid"]))')}"
     - git fetch --no-tags origin "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-$CI_DEFAULT_BRANCH}"
+      "refs/merge-requests/${MR_IID}/head"
     - reviewloop run
 """
 

@@ -1,5 +1,7 @@
 import json
+import logging
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -258,6 +260,86 @@ def test_logs_are_redacted(ci: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     assert "while parsing" in result.stderr
 
 
+def test_github_ignored_event_reads_no_pull_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The adapter's constructor fetches the repository (PyGithub is not lazy); nothing else may be called.
+    monkeypatch.chdir(tmp_path)
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({"action": "closed", "pull_request": {"number": 7}}))
+    env = {**github_env(tmp_path), "RUNNER_TEMP": str(tmp_path)}
+    with patch("reviewloop.vcs.github.Github") as gh:
+        result = runner.invoke(cli.app, ["run"], env=env)
+    assert result.exit_code == 0, result.stderr
+    assert "ignored" in result.stderr
+    calls = [c[0] for c in gh.return_value.mock_calls]
+    assert calls == ["get_repo"]
+    assert gh.return_value.get_repo.return_value.mock_calls == []
+
+
+def test_workdir_failure_exits_2_without_traceback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(cli.app, ["run"], env={"RUNNER_TEMP": str(tmp_path / "missing"), "GITHUB_TOKEN": FAKE_TOKEN})
+    assert result.exit_code == 2
+    assert "FileNotFoundError" in result.stderr
+    assert "Traceback" not in result.output and "Traceback" not in result.stderr
+    assert FAKE_TOKEN not in result.output and FAKE_TOKEN not in result.stderr
+
+
+def test_interrupt_exits_2_and_removes_workdir(ci: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    with_event(ci.vcs, Event(kind=EventKind.OPENED, pr_number=7))
+
+    def cancel(ctx: RunContext) -> None:
+        assert ctx.workdir.is_dir()
+        # What a CI cancel sends; the CLI turns it into an interrupt.
+        signal.raise_signal(signal.SIGTERM)
+
+    monkeypatch.setattr(flows, "initial_flow", lambda: [Step("cancelled", cancel)])
+    before = signal.getsignal(signal.SIGTERM)
+
+    result = ci.invoke("run")
+
+    assert result.exit_code == 2
+    assert "interrupted" in result.stderr
+    assert [p for p in tmp_path.iterdir() if p.name.startswith("reviewloop-")] == []
+    assert signal.getsignal(signal.SIGTERM) is before
+
+
+def test_artifact_failure_keeps_flow_error(ci: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    with_event(ci.vcs, Event(kind=EventKind.OPENED, pr_number=7))
+    monkeypatch.setattr(flows, "initial_flow", lambda: [Step("post-comment", raise_(ReviewloopError("VCS down")))])
+    (tmp_path / "blocker").write_text("a file, not a directory")
+
+    result = ci.invoke("run", "--output-dir", str(tmp_path / "blocker"))
+
+    assert result.exit_code == 2
+    assert "could not write artifacts" in result.stderr
+    assert "VCS down" in result.stderr
+
+
+def test_library_logs_redacted(ci: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    with_event(ci.vcs, Event(kind=EventKind.OPENED, pr_number=7))
+
+    def noisy(ctx: RunContext) -> None:
+        lib = logging.getLogger("urllib3.connectionpool")
+        lib.warning("retrying with %s", FAKE_TOKEN)
+        lib.debug("debug %s", "hidden-debug-line")
+
+    monkeypatch.setattr(flows, "initial_flow", lambda: [Step("noisy", noisy)])
+
+    result = ci.invoke("run")
+
+    assert result.exit_code == 0, result.stderr
+    assert "urllib3.connectionpool: retrying with [redacted]" in result.stderr
+    assert "hidden-debug-line" not in result.stderr
+    assert FAKE_TOKEN not in result.stderr
+
+
+def test_redact_filter_survives_bad_format() -> None:
+    # pytest's capture handler re-raises format errors, so the filter is tested on its own record.
+    record = logging.LogRecord("lib", logging.WARNING, __file__, 1, "bad %s %s " + FAKE_TOKEN, ("x",), None)
+    assert cli._Redact().filter(record)  # pyright: ignore[reportPrivateUsage]
+    assert record.getMessage() == "bad %s %s [redacted]"
+
+
 def test_check_auth_before_any_comment(ci: Any, make_agent: Any) -> None:
     calls: list[str] = []
     with_event(ci.vcs, Event(kind=EventKind.OPENED, pr_number=7))
@@ -288,9 +370,9 @@ def test_manual_review_targets_pr_and_skips_permission_check(ci: Any, monkeypatc
                           pr_number=7)]  # fmt: skip
 
 
-def test_recheck_until_follow_up_exists(ci: Any) -> None:
+def test_recheck_until_follow_up_exists(ci: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     with_event(ci.vcs, Event(kind=EventKind.COMMAND, command=Command.RECHECK, actor=READER, pr_number=7))
-    assert flows.follow_up_flow() == []
+    monkeypatch.setattr(flows, "follow_up_flow", list)
     for args in (["run"], ["recheck", "--pr", "7"]):
         result = ci.invoke(*args)
         assert result.exit_code == 0
@@ -407,8 +489,22 @@ def test_init_github_snippet(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(cli.app, ["init"], env={"GITHUB_ACTIONS": "true"})
     assert result.exit_code == 0
+    out = result.stdout
     for text in ("persist-credentials: false", "fetch-depth: 0", "uses: tpham1467/reviewloop@v0"):
-        assert text in result.stdout
+        assert text in out
+    assert 'fetch --no-tags origin "refs/pull/${PR_NUMBER}/head"' in out
+    assert "PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}" in out
+    # The token goes to the fetch command only; checkout keeps no credential.
+    assert out.count("GH_TOKEN") == 2 and "extraheader" in out
+    # Concurrency sits under the job, after its `if`, so a plain comment cannot cancel a review.
+    assert out.index("concurrency:") > out.index("if: >-") > out.index("jobs:")
+
+
+def test_init_gitlab_snippet_fetches_mr_head(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    out = runner.invoke(cli.app, ["init", "--platform", "gitlab"]).stdout
+    assert '"refs/merge-requests/${MR_IID}/head"' in out
+    assert "CI_MERGE_REQUEST_IID" in out and "TRIGGER_PAYLOAD" in out
 
 
 @pytest.mark.parametrize("name", ["bitbucket-cloud", "bitbucket-dc"])
