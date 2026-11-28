@@ -6,6 +6,7 @@ import pytest
 
 from reviewloop.agents import isolation
 from reviewloop.agents.isolation import (
+    is_sha,
     prepare_sandbox,
     scrub_env,
     snapshot,
@@ -502,3 +503,9 @@ def test_verify_rejects_deleted_file(tmp_path: Path) -> None:
 
     with pytest.raises(AgentStepError, match=r"src/a\.py"):
         verify_only_output_changed(before, snapshot(root), OUTPUT)
+
+
+@pytest.mark.parametrize(("value", "ok"), [("a" * 40, True), ("b" * 64, True), ("abc1234", False), ("A" * 40, False),
+                                           ("-" + "a" * 39, False), ("a" * 41, False)])  # fmt: skip
+def test_is_sha_accepts_only_full_hex_commit_ids(value: str, ok: bool) -> None:
+    assert is_sha(value) is ok

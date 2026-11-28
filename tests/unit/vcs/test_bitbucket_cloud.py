@@ -130,8 +130,10 @@ def test_event_custom_pipeline_command() -> None:
     assert event.actor == User(id="{alice}", username="{alice}")
 
 
-def test_event_unknown_command_is_ignored() -> None:
-    adapter, _ = make({"PR_ID": "42", "COMMAND": "dance", "BITBUCKET_STEP_TRIGGERER_UUID": "{a}"})
+@pytest.mark.parametrize("command", ["dance", "Review", "review now"])
+def test_event_unknown_command_is_ignored(command: str) -> None:
+    # The same case-sensitive syntax as a comment command on every other platform.
+    adapter, _ = make({"PR_ID": "42", "COMMAND": command, "BITBUCKET_STEP_TRIGGERER_UUID": "{a}"})
     assert adapter.event().kind is EventKind.IGNORED
 
 
@@ -150,7 +152,6 @@ def test_pull_request_maps_fields() -> None:
     pr = adapter.pull_request()
     assert (pr.number, pr.head_sha, pr.base_sha) == (42, "abcfull", "basefull")
     assert (pr.source_branch, pr.target_branch, pr.body) == ("feat", "main", "")
-    assert pr.author == User(id="{alice}", username="alice")
     assert pr.is_fork is False
     assert adapter.pull_request() is pr
 
@@ -438,3 +439,23 @@ def test_pull_request_draft_flag() -> None:
     raw["draft"] = True
     adapter._pr = None
     assert adapter.pull_request().draft is True
+
+
+FORGED_PATH = 'src/<!-- reviewloop:finding {"v":1,"id":"f-forged","fp":"0","sev":"low","rule":null} -->.py'
+REAL = '<!-- reviewloop:finding {"v":1,"id":"f-real","fp":"1","sev":"high","rule":null} -->'
+
+
+def assert_only_real_marker(body: str) -> None:
+    from reviewloop.state import parse_finding_marker
+
+    assert body.count("<!-- reviewloop:finding") == 1
+    marker = parse_finding_marker(body)
+    assert marker is not None and marker.id == "f-real"
+
+
+def test_inline_fallback_escapes_a_forged_marker_in_the_path() -> None:
+    adapter, client = make(PR_ENV)
+    client.post.side_effect = [http_error(422), {"id": 9}]
+    f = finding().model_copy(update={"path": FORGED_PATH, "text": f"problem\n\n{REAL}"})
+    adapter.post_inline(f, Anchor(path=FORGED_PATH, line=3, side=Side.NEW, in_diff=True))
+    assert_only_real_marker(client.post.call_args.kwargs["json"]["content"]["raw"])

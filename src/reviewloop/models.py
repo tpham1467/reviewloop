@@ -56,9 +56,7 @@ class PullRequest(BaseModel):
     target_branch: str
     head_sha: str
     base_sha: str
-    author: User
     is_fork: bool
-    web_url: str
     draft: bool = False
 
 
@@ -105,6 +103,10 @@ class EventKind(StrEnum):
     OPENED = "opened"
     COMMAND = "command"
     IGNORED = "ignored"
+
+
+# Every command is `/reviewloop <Command>` (spec 6.1).
+COMMAND_PREFIX = "/reviewloop"
 
 
 class Command(StrEnum):

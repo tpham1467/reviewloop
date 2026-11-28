@@ -1,6 +1,5 @@
 import json
 import os
-import re
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
@@ -12,7 +11,6 @@ from gitlab.exceptions import GitlabCreateError, GitlabGetError
 from reviewloop.errors import ReviewloopError
 from reviewloop.models import (
     Anchor,
-    Command,
     Event,
     EventKind,
     Finding,
@@ -24,8 +22,8 @@ from reviewloop.models import (
     User,
 )
 from reviewloop.state import parse_finding_marker
+from reviewloop.vcs.common import SUMMARY_MARKER, located, parse_command, suggestion_fence, with_suggestion
 
-SUMMARY_MARKER = "<!-- reviewloop:summary -->"
 _DEVELOPER = 30
 _MAX_SUGGESTION_LINES = 30
 _NOT_FOUND = 404
@@ -126,13 +124,12 @@ class GitLabAdapter:
             mr: dict[str, Any] = payload.get("merge_request") or {}
             if attrs.get("noteable_type") != "MergeRequest":
                 return Event(kind=EventKind.IGNORED)
-            lines = [ln.strip() for ln in str(attrs.get("note", "")).splitlines() if ln.strip()]
-            parts = lines[0].split() if lines else []
-            if len(parts) != 2 or parts[0] != "/reviewloop":
+            command = parse_command(str(attrs.get("note", "")))
+            if command is None:
                 return Event(kind=EventKind.IGNORED)
             return Event(
                 kind=EventKind.COMMAND,
-                command=Command(parts[1]),
+                command=command,
                 actor=_user(payload["user"]),
                 pr_number=int(mr["iid"]),
             )
@@ -149,9 +146,7 @@ class GitLabAdapter:
             target_branch=mr.target_branch,
             head_sha=mr.diff_refs["head_sha"],
             base_sha=mr.diff_refs["base_sha"],
-            author=_user(mr.author),
             is_fork=mr.source_project_id != mr.target_project_id,
-            web_url=mr.web_url,
             # Older GitLab versions only send work_in_progress.
             draft=bool(getattr(mr, "draft", False) or getattr(mr, "work_in_progress", False)),
         )
@@ -208,14 +203,13 @@ class GitLabAdapter:
         if not finding.suggestion or finding.security or lines > _MAX_SUGGESTION_LINES:
             return finding.text
         block = self.suggestion_block(anchor, finding.suggestion, replaced_lines=lines)
-        return f"{finding.text}\n\n{block}" if block else finding.text
+        return with_suggestion(finding.text, block) if block else finding.text
 
     def post_inline(self, finding: Finding, anchor: Anchor) -> ThreadRef:
         mr = self._mr(self._pr_number())
-        span = f"{anchor.start_line}-{anchor.line}" if anchor.start_line is not None else str(anchor.line)
-        located = f"`{anchor.path}:{span}`\n\n{finding.text}"
+        general = {"body": located(anchor, finding.text)}
         if not anchor.in_diff:
-            return self._create_discussion(mr, {"body": located})
+            return self._create_discussion(mr, general)
         refs = mr.diff_refs
         position: dict[str, Any] = {
             "position_type": "text",
@@ -230,7 +224,7 @@ class GitLabAdapter:
         try:
             return self._create_discussion(mr, {"body": self._finding_body(finding, anchor), "position": position})
         except GitlabCreateError:
-            return self._create_discussion(mr, {"body": located})
+            return self._create_discussion(mr, general)
 
     @staticmethod
     def _create_discussion(mr: Any, data: dict[str, Any]) -> ThreadRef:
@@ -268,8 +262,7 @@ class GitLabAdapter:
     def suggestion_block(self, anchor: Anchor, code: str, replaced_lines: int = 1) -> str | None:
         if anchor.side is not Side.NEW or not anchor.in_diff:
             return None
-        longest = max((len(m) for m in re.findall(r"`+", code)), default=0)
-        fence = "`" * max(3, longest + 1)
+        fence = suggestion_fence(code)
         return f"{fence}suggestion:-{max(replaced_lines, 1) - 1}+0\n{code}\n{fence}"
 
     def read_file(self, path: str, ref: str) -> str | None:

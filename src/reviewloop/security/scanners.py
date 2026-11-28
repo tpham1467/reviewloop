@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import subprocess
 import tempfile
@@ -21,6 +22,10 @@ from reviewloop.agents.isolation import host_git_env
 log = logging.getLogger("reviewloop.security")
 
 TIMEOUT_SECONDS = 90
+# opengrep runs only with rules the user provides (rulings R87, R88): the env names a rules directory, else the fixed
+# path, which the image leaves empty. Never `--config auto`, which would download an unpinned registry pack each run.
+RULES_ENV = "REVIEWLOOP_OPENGREP_RULES"
+DEFAULT_RULES = Path("/opt/opengrep-rules")
 
 
 @dataclass(frozen=True)
@@ -118,6 +123,14 @@ def scan_history(workdir: Path, base_sha: str, head_sha: str) -> list[ScanFindin
         return _gitleaks(workdir, base_sha, head_sha, tmp)
 
 
+def _opengrep_rules() -> Path | None:
+    configured = os.environ.get(RULES_ENV)
+    # Resolved here: opengrep runs with the sandbox copy as cwd, where a relative path would name PR-controlled files.
+    rules = Path(configured).resolve() if configured else DEFAULT_RULES
+    # An empty directory (a bare mount point) has no rules; opengrep would fail on it.
+    return rules if rules.is_dir() and any(rules.iterdir()) else None
+
+
 def run_scanners(
     names: list[str], repo: Path, tree: Path, base_sha: str, head_sha: str, changed_paths: list[str]
 ) -> list[ScanFinding]:
@@ -138,7 +151,13 @@ def run_scanners(
                 if not changed_paths:
                     log.info("opengrep skipped: no changed files")
                     continue
+                rules = _opengrep_rules()
+                if rules is None:
+                    log.info("opengrep skipped: no rules at %s (set %s)", os.environ.get(RULES_ENV) or DEFAULT_RULES,
+                             RULES_ENV)  # fmt: skip
+                    continue
                 report = Path(tmp) / "opengrep.sarif"
-                cmd = ["opengrep", "scan", "--sarif", "--output", str(report), "--config", "auto", "--quiet"]
+                cmd = ["opengrep", "scan", "--sarif", "--output", str(report), "--config", str(rules),
+                       "--disable-version-check", "--quiet"]  # fmt: skip
                 findings += _run([*cmd, "--", *changed_paths], tree, report, _parse_sarif) or []
     return findings

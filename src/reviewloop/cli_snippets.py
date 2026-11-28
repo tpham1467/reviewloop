@@ -95,7 +95,8 @@ workflow:
 BITBUCKET_CLOUD = r"""# Bitbucket Cloud: review every pull request, plus a manual pipeline for commands.
 # Set REVIEWLOOP_BITBUCKET_TOKEN (access token) and your agent credential as
 # secured repository variables.
-image: ghcr.io/tpham1467/reviewloop:0
+# Exact version, bumped on each release; review a new version before you update it.
+image: ghcr.io/tpham1467/reviewloop:0.1.0 # x-release-please-version
 
 pipelines:
   pull-requests:
@@ -167,7 +168,8 @@ pipeline {
     stage('Review') {
       agent {
         docker {
-          image 'ghcr.io/tpham1467/reviewloop:0'
+          // Exact version, bumped on each release; review a new version before you update it.
+          image 'ghcr.io/tpham1467/reviewloop:0.1.0' // x-release-please-version
           args '--entrypoint='
           reuseNode true
         }

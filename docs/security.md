@@ -64,6 +64,10 @@ job. reviewloop cannot remove them, because the job may need them. An agent whos
 
 - base images pinned by digest; gitleaks and opengrep pinned by version and sha256; Node and the agent CLIs pinned by
   exact version;
+- no opengrep rules: opengrep runs only with rules you provide (a mounted directory in `REVIEWLOOP_OPENGREP_RULES`, or
+  `/opt/opengrep-rules` in a derived image), with the version check off, so the scanners make no network call. Out
+  of the box only gitleaks scans. reviewloop never runs `--config auto`, which would download rules on every run.
+  See [Configuration](configuration.md#scanners);
 - runs as a non-root user (uid 1001), also in the GitLab component. reviewloop trusts exactly the CI checkout path
   for its git calls (`safe.directory`), never `*` and never the agent sandbox. The GitHub Action runs the image as the
   runner's user, with all capabilities dropped and `no-new-privileges`;

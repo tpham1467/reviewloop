@@ -1,6 +1,9 @@
 """Place a finding on a diff line from the verbatim code it quotes (spec section 7)."""
 
 from collections.abc import Callable
+from enum import StrEnum
+
+from pydantic import BaseModel
 
 from reviewloop.diff import FileDiff, changed_new_lines
 from reviewloop.models import Anchor, Finding, Side
@@ -9,6 +12,26 @@ from reviewloop.models import Anchor, Finding, Side
 _Run = list[tuple[int, str]]
 # A matched window, as (first line, last line).
 _Window = tuple[int, int]
+
+
+class Match(StrEnum):
+    """Which part of the finding placed it."""
+
+    EXISTING_CODE = "existing_code"
+    CAUSE_CODE = "cause_code"
+    LINE = "line"
+
+
+class Placement(BaseModel):
+    anchor: Anchor
+    match: Match
+    # The anchor is in the file the finding is about (its `path`, or that file's old name).
+    own_file: bool
+
+    def allows_suggestion(self) -> bool:
+        """A suggestion replaces the anchored lines, so it fits only where the finding's own `existing_code` sits on
+        the new side of its own file; a cause, another file or a bare line would replace unrelated code."""
+        return self.match is Match.EXISTING_CODE and self.own_file and self.anchor.side is Side.NEW
 
 
 def _exact(text: str) -> str:
@@ -103,24 +126,29 @@ def _anchor_quote(
     return None
 
 
-def resolve_anchor(f: Finding, diffs: list[FileDiff], read_new_file: Callable[[str], str | None]) -> Anchor | None:
-    """Resolve where to post `f`, or None when the finding must go back to the agent for repair.
+def resolve_anchor(f: Finding, diffs: list[FileDiff], read_new_file: Callable[[str], str | None]) -> Placement | None:
+    """Resolve where to post `f` and how it matched, or None when the finding must go back to the agent for repair.
 
     `cause_code` (the changed code behind a finding on unchanged code) is tried first, then `existing_code`.
     A cause must sit in the diff, so it skips the full-file rule.
     """
     own = next((fd for fd in diffs if f.path in (fd.path, fd.old_path)), None)
     others = [fd for fd in diffs if fd is not own]
-    for quote, reader in ((f.cause_code, None), (f.existing_code, read_new_file)):
+    passes = ((f.cause_code, None, Match.CAUSE_CODE), (f.existing_code, read_new_file, Match.EXISTING_CODE))
+    for quote, reader, match in passes:
         lines = _quote_lines(quote or "")
         if lines:
             anchor = _anchor_quote(lines, f.line, own, others, reader)
             if anchor is not None:
-                return anchor
+                return Placement(anchor=anchor, match=match, own_file=own is not None and anchor.path == own.path)
     if own is None:
         return None
     if f.side is Side.NEW:
         changed = changed_new_lines(own)
     else:
         changed = {ln.old_no for h in own.hunks for ln in h.lines if ln.kind == "del" and ln.old_no is not None}
-    return Anchor(path=own.path, line=f.line, side=f.side, in_diff=True) if f.line in changed else None
+    if f.line not in changed:
+        return None
+    return Placement(
+        anchor=Anchor(path=own.path, line=f.line, side=f.side, in_diff=True), match=Match.LINE, own_file=True
+    )

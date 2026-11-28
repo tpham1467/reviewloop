@@ -112,7 +112,8 @@ GitLab CI does not start on comments, so a webhook starts a trigger pipeline.
 
 The job reads the merge request from `TRIGGER_PAYLOAD`, checks out its target branch and fetches its head. In the
 pipeline of a comment that is not a `/reviewloop` command, the reviewloop job finishes within seconds without calling
-an agent. A failed fetch or checkout exits `2`, like any infrastructure error.
+an agent. A failed fetch or checkout exits `2`, like any infrastructure error. The bot's own notes (findings, replies,
+the summary) are comments too, so each one also starts a trigger pipeline that exits within seconds.
 
 | Command | Effect |
 | --- | --- |

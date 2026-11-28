@@ -13,6 +13,17 @@
 Every pull request now runs the `pull-requests` pipeline and posts a review. A pull request
 that already has the bot's summary comment is skipped.
 
+The example pins an exact image version; each reviewloop release bumps it in the example. Review a
+new version before you change yours.
+
+## What the job checks out
+
+Bitbucket Pipelines checks out the pull request's source branch (the PR head), not the target branch. reviewloop
+still reads `.reviewloop.yml` and repository rule files from the target branch through the API, but anything the
+scanners read from the working tree is PR-controlled here: a `.gitleaks.toml` or opengrep ignore file committed in
+the pull request can silence those scanners for that pull request. The agent review is not affected. Use
+`fail_on` and branch protection with this in mind, and review changes to scanner config files.
+
 ## Bot account UUID
 
 The adapter must know which account is the bot to find its own summary and threads. It asks

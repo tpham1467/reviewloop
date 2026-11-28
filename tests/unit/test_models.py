@@ -91,10 +91,9 @@ class _FakeVcs:
         return Event(kind=EventKind.IGNORED)
 
     def pull_request(self) -> PullRequest:
-        u = User(id="1", username="u")
         return PullRequest(
             number=1, title="t", body="", source_branch="s", target_branch="m",
-            head_sha="h", base_sha="b", author=u, is_fork=False, web_url="http://x",
+            head_sha="h", base_sha="b", is_fork=False,
         )  # fmt: skip
 
     def bot_identity(self) -> User:
@@ -138,7 +137,7 @@ class _FakeAgent:
         return None
 
     def run(self, task: AgentTask) -> AgentResult:
-        return AgentResult(output=_Out(ok=True), transcript_path=Path("t"), duration_s=0.1)
+        return AgentResult(output=_Out(ok=True))
 
 
 class _FakeTracker:

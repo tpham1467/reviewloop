@@ -116,9 +116,7 @@ def test_run_returns_validated_output_and_transcript(fake_agent: str, make_task)
     result = ClaudeCodeAdapter(binary=fake_agent).run(task)
 
     assert result.output.model_dump() == dict(message="done", count=3)
-    assert result.transcript_path == task.workdir / ".reviewloop" / "logs" / "review-1.jsonl"
-    assert '"type": "result"' in result.transcript_path.read_text()
-    assert result.duration_s >= 0
+    assert '"type": "result"' in (task.workdir / ".reviewloop" / "logs" / "review-1.jsonl").read_text()
 
 
 def test_run_scrubs_env_and_uses_fresh_home(
@@ -252,9 +250,10 @@ def test_timeout_kills_process_group(fake_agent: str, make_task) -> None:
 
 
 def test_run_kills_leftover_processes(fake_agent: str, make_task) -> None:
-    result = ClaudeCodeAdapter(binary=fake_agent).run(make_task(mode="spawn_exit"))
+    task = make_task(mode="spawn_exit")
+    ClaudeCodeAdapter(binary=fake_agent).run(task)
 
-    assert _wait_dead(_grandchild(result.transcript_path))
+    assert _wait_dead(_grandchild(task.workdir / ".reviewloop" / "logs" / "review-1.jsonl"))
 
 
 def test_run_unstartable_binary_fails_step(make_task, tmp_path: Path) -> None:

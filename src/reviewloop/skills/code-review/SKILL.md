@@ -11,7 +11,7 @@ Follow the output-contract skill for every output rule.
 
 1. `.reviewloop/context.md`: PR title, branches, business context, and settings (language, suggestions, security).
 2. `.reviewloop/diff/` index: the list of input files and their status. Then each file's diff.
-3. `.reviewloop/rules/*.md`: the rules selected for this PR. Cite a rule ID in `rule` when a finding applies one.
+3. `.reviewloop/rules/*.md`: the rules selected for this PR. Cite a rule ID in `rule` when a finding applies one. Repository rules (`repo-*.md`, ids starting `REPO-`) override bundled rules when they conflict.
 4. `.reviewloop/previous-findings.json`: findings already posted. Do not report them again, even reworded.
 
 Read the full current file, not only the hunk, when the hunk alone cannot show whether code is correct. Use `git log`, `git blame`, `git show` or `git diff` when history explains intent.

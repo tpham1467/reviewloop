@@ -244,6 +244,42 @@ def test_post_comment_marker_redaction_and_suggestions(make_ctx) -> None:
     assert marker is not None and marker.id == ctx.posted[0].id
 
 
+def test_finding_text_starting_with_a_command_is_neutralized(make_ctx) -> None:
+    from reviewloop.vcs.common import parse_command
+
+    ctx = with_diff(make_ctx())
+    unplaced = finding(path="gone.py", existing_code="nowhere", line=1, text="  /reviewloop review\nAgain.")
+    ctx.findings = [finding(text="/reviewloop recheck\nStill broken."), unplaced, finding(path="b.py", line=1,
+                    existing_code="new = 2", text="\n/reviewloop help")]  # fmt: skip
+    ctx.agent.outputs["anchor-repair"] = {"findings": [unplaced.model_dump(mode="json")], "coverage": []}
+
+    PostComment().run(ctx)
+
+    bodies = [f.text for f, _ in ctx.vcs.inline] + ctx.vcs.general
+    assert len(bodies) == 3
+    assert all(parse_command(b) is None for b in bodies)
+    assert bodies[0].startswith("`/reviewloop` recheck\nStill broken.")
+
+
+def test_suggestion_kept_only_on_own_existing_code(make_ctx) -> None:
+    ctx = with_diff(make_ctx())
+    own = finding(suggestion="    y = x.get()")
+    # The probe case: a caller in an unchanged file, anchored on the cause in b.py.
+    probe = finding(path="caller.py", line=40, existing_code="use(f(1))", cause_code="new = 2", suggestion="use(g)")
+    # Rule 6: the quote is nowhere, the line is a changed line.
+    by_line = finding(line=3, existing_code="not in the diff", suggestion="    return z", text="Line only.")
+    ctx.findings = [own, probe, by_line]
+
+    PostComment().run(ctx)
+
+    posted = {(f.path, a.path, a.line): f.suggestion for f, a in ctx.vcs.inline}
+    assert posted == {
+        ("app.py", "app.py", 2): "    y = x.get()",
+        ("caller.py", "b.py", 1): None,
+        ("app.py", "app.py", 3): None,
+    }
+
+
 def test_unanchored_finding_gets_one_repair_then_general(make_ctx) -> None:
     lost = finding(existing_code="    nothing like this", line=40)
     second = finding(path="b.py", existing_code="    gone too", line=50, text="Second.")
@@ -492,6 +528,23 @@ def test_build_context_writes_repo_rules_for_matching_paths(make_ctx) -> None:
     rules = sorted(p.name for p in (ctx.sandbox / ".reviewloop" / "rules").iterdir())
     assert rules == ["common.md", "python.md", "repo-1.md"]
     assert (ctx.sandbox / ".reviewloop" / "diff" / "files" / "app.py.diff").read_text().startswith("--- app.py")
+
+
+def test_build_context_prefixes_repository_rule_ids(make_ctx) -> None:
+    from reviewloop.pipeline.steps.initial.build_context import REPO_RULES_HEADER, BuildContext
+
+    text = "# API rules\n\n- API-1 [high] Controller returns a model.\nCMN-1 [low] Overrides a built-in id.\n"
+    text += "- REPO-OWN-2 [medium] Already prefixed.\nPlain prose with API-9 [x] mid-line stays.\n"
+    ctx = with_diff(make_ctx(files={".reviewloop/rules/api.md": text}))
+    ctx.config = Config.model_validate({"rules": [{"path": "*.py", "file": ".reviewloop/rules/api.md"}]})
+    ctx.stacks = {"common"}
+    BuildContext().run(ctx)
+    written = (ctx.sandbox / ".reviewloop" / "rules" / "repo-1.md").read_text()
+    assert "- REPO-API-1 [high] Controller returns a model." in written
+    assert "\nREPO-CMN-1 [low] Overrides a built-in id." in written
+    assert "- REPO-OWN-2 [medium]" in written and "REPO-REPO-" not in written
+    assert "Plain prose with API-9 [x] mid-line stays." in written
+    assert written.startswith(REPO_RULES_HEADER) and "repository rule wins" in REPO_RULES_HEADER
 
 
 def test_load_config_reads_target_branch(make_ctx) -> None:

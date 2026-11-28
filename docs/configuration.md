@@ -50,7 +50,7 @@ review_drafts: false
 | `security.enabled` | `true` | Run the security review branch |
 | `security.scanners` | `[opengrep, gitleaks]` | Scanners run before the security agents, when installed |
 | `suggestions` | `true` | Attach code suggestions where the platform supports them |
-| `fail_on` | `none` | Exit `1` when a finding is at or above this severity |
+| `fail_on` | `none` | Exit `1` when a finding of an initial review is at or above this severity. A recheck exits `0` or `2` only, unless no earlier review exists and it runs a full review instead |
 | `large_diff_lines` | `3000` | Above this many changed lines the diff is split into groups |
 | `review_drafts` | `false` | Review draft pull requests when they open |
 
@@ -69,8 +69,25 @@ A rule file is Markdown with one rule per line, for example:
 - API-1 [high] A controller action returns an Eloquent model directly. It leaks hidden columns. Return a resource.
 ```
 
-Rule files are read from the target branch. They are added on top of the built-in rules for the detected stacks.
-Use ids that do not collide with the built-in ones (built-in ids start with a stack prefix such as `PY-` or `CMN-`).
+Rule files are read from the target branch. They are added on top of the built-in rules for the detected stacks, and
+a repository rule wins when it conflicts with a built-in one. reviewloop prefixes every rule id with `REPO-`
+(`API-1` becomes `REPO-API-1`), so findings never mix up a repository rule with a built-in id such as `PY-1`.
+
+## Scanners
+
+`security.scanners` runs gitleaks (on the PR's commits) and opengrep (on the changed files) before the security
+agents. Their output is a hint for the agents; a missing scanner is skipped with one log line.
+
+Out of the box only gitleaks scans: the image ships the opengrep binary but no rules. opengrep runs only with rules
+you provide, from `REVIEWLOOP_OPENGREP_RULES` (a directory of opengrep rule files) or, when that is unset, from
+`/opt/opengrep-rules`. Either:
+
+- mount a rules directory into the job and set `REVIEWLOOP_OPENGREP_RULES` to its path, or
+- build a derived image that copies your rules to `/opt/opengrep-rules`.
+
+reviewloop runs opengrep with `--config <rules directory> --disable-version-check`, so a scan makes no network call.
+When no rules are present (the variable unset and `/opt/opengrep-rules` missing or empty), opengrep is skipped with one
+log line. reviewloop never runs `--config auto`, which downloads rules on every run.
 
 ## Tracker
 

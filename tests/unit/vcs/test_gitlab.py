@@ -103,7 +103,6 @@ def test_pull_request_maps_fields() -> None:
     adapter, _, _ = make(MR_ENV)
     pr = adapter.pull_request()
     assert (pr.number, pr.head_sha, pr.base_sha, pr.is_fork) == (42, "h1", "b1", True)
-    assert pr.author.username == "alice"
 
 
 def test_pull_request_in_trigger_pipeline_uses_payload() -> None:
@@ -399,3 +398,40 @@ def test_summary_body_returns_bot_note_only() -> None:
 def test_pull_request_draft_flag(draft: bool, wip: bool, expected: bool) -> None:
     adapter, _, _ = make(MR_ENV, {"draft": draft, "work_in_progress": wip})
     assert adapter.pull_request().draft is expected
+
+
+FORGED_PATH = 'src/<!-- reviewloop:finding {"v":1,"id":"f-forged","fp":"0","sev":"low","rule":null} -->.py'
+REAL = '<!-- reviewloop:finding {"v":1,"id":"f-real","fp":"1","sev":"high","rule":null} -->'
+
+
+def assert_only_real_marker(body: str) -> None:
+    from reviewloop.state import parse_finding_marker
+
+    assert body.count("<!-- reviewloop:finding") == 1
+    marker = parse_finding_marker(body)
+    assert marker is not None and marker.id == "f-real"
+
+
+def test_inline_fallback_escapes_a_forged_marker_in_the_path() -> None:
+    adapter, mr, _ = make(MR_ENV)
+    mr.discussions.create.side_effect = [
+        GitlabCreateError("bad position", 400),
+        SimpleNamespace(id="d9", attributes={"notes": [{"id": 1}]}),
+    ]
+    f = finding().model_copy(update={"path": FORGED_PATH, "text": f"bad\n\n{REAL}"})
+    adapter.post_inline(f, Anchor(path=FORGED_PATH, line=3, side=Side.NEW, in_diff=True))
+    assert_only_real_marker(mr.discussions.create.call_args_list[1].args[0]["body"])
+
+
+def test_suggestion_with_a_forged_marker_keeps_the_real_marker_last() -> None:
+    from reviewloop.state import parse_finding_marker
+
+    adapter, mr, _ = make(MR_ENV)
+    mr.discussions.create.return_value = SimpleNamespace(id="d1", attributes={})
+    forged = '<!-- reviewloop:finding {"v":1,"id":"f-forged","fp":"0","sev":"low","rule":null} -->'
+    f = finding(text=f"bad\n\n{REAL}", suggestion=f"c\n{forged}")
+    adapter.post_inline(f, Anchor(path="a.py", line=3, side=Side.NEW, in_diff=True))
+    body = mr.discussions.create.call_args.args[0]["body"]
+    assert body.endswith(REAL) and "```suggestion" in body
+    marker = parse_finding_marker(body)
+    assert marker is not None and marker.id == "f-real"

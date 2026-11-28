@@ -6,7 +6,6 @@ import re
 import signal
 import subprocess
 import tempfile
-import time
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -90,7 +89,6 @@ def run_cli(task: AgentTask, argv: list[str], env: Mapping[str, str]) -> AgentRe
     (task.workdir / rel).unlink(missing_ok=True)
     transcript = _transcript_path(task)
     before = snapshot(task.workdir)
-    start = time.monotonic()
     with transcript.open("wb") as stdout, tempfile.TemporaryFile() as stderr:
         try:
             proc = subprocess.Popen(  # noqa: S603
@@ -115,14 +113,13 @@ def run_cli(task: AgentTask, argv: list[str], env: Mapping[str, str]) -> AgentRe
         stderr.seek(0)
         # Redact the whole stream before cutting: a cut could split a token or key block so no pattern matches it.
         err = redact(stderr.read().decode(errors="replace").strip())[-STDERR_TAIL:]
-    duration = time.monotonic() - start
     try:
         verify_only_output_changed(before, snapshot(task.workdir), rel, transcript.relative_to(task.workdir))
     except AgentStepError as exc:
         raise AgentStepError(f"step '{task.step}': {exc}") from exc
     if proc.returncode != 0:
         raise AgentStepError(f"step '{task.step}': agent exited with exit code {proc.returncode}: {err}")
-    return AgentResult(output=read_output(task), transcript_path=transcript, duration_s=duration)
+    return AgentResult(output=read_output(task))
 
 
 def _repair_prompt(task: AgentTask, error: AgentOutputError) -> str:

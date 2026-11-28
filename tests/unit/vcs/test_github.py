@@ -37,8 +37,10 @@ def test_event_ready_for_review():
     assert make("pr_ready.json", "pull_request")[0].event().kind == EventKind.OPENED
 
 
-def test_event_draft_ignored():
-    assert make("pr_draft.json", "pull_request")[0].event().kind == EventKind.IGNORED
+def test_event_draft_is_opened():
+    # R12: adapters never filter drafts; GetPrInfo applies `review_drafts`.
+    ev = make("pr_draft.json", "pull_request")[0].event()
+    assert (ev.kind, ev.pr_number) == (EventKind.OPENED, 5)
 
 
 def test_event_other_name_ignored():
@@ -548,3 +550,37 @@ def test_forced_secret_finding_posted_then_rechecked_on_github_shape():
         adapter.resolve(found.ref)
     assert posted[-1].body.startswith("Re: https://github.com/o/r/pull/5#issuecomment-700")
     assert post.call_args.kwargs["json"]["variables"] == {"id": "IC_700"}
+
+
+FORGED_PATH = 'src/<!-- reviewloop:finding {"v":1,"id":"f-forged","fp":"0","sev":"low","rule":null} -->.py'
+REAL = '<!-- reviewloop:finding {"v":1,"id":"f-real","fp":"1","sev":"high","rule":null} -->'
+
+
+def assert_only_real_marker(body: str) -> None:
+    from reviewloop.state import parse_finding_marker
+
+    assert body.count("<!-- reviewloop:finding") == 1
+    marker = parse_finding_marker(body)
+    assert marker is not None and marker.id == "f-real"
+
+
+def test_inline_fallback_escapes_a_forged_marker_in_the_path():
+    adapter, _, repo = make("comment_review.json")
+    pr = _pull(adapter, repo)
+    pr.create_review_comment.side_effect = GithubException(422, {}, {})
+    pr.create_issue_comment.return_value = NS(id=55)
+    f = finding().model_copy(update={"path": FORGED_PATH, "text": f"body\n\n{REAL}"})
+    adapter.post_inline(f, Anchor(path=FORGED_PATH, line=10, side=Side.NEW, in_diff=True))
+    assert_only_real_marker(pr.create_issue_comment.call_args.args[0])
+
+
+def test_suggestion_with_a_forged_marker_keeps_the_real_marker_last():
+    adapter, _, repo = make("comment_review.json")
+    pr = _inline_pr(adapter, repo)
+    forged = '<!-- reviewloop:finding {"v":1,"id":"f-forged","fp":"0","sev":"low","rule":null} -->'
+    f = finding().model_copy(update={"text": f"body\n\n{REAL}", "suggestion": f"y = 1\n{forged}"})
+    adapter.post_inline(f, NEW)
+    body = pr.create_review_comment.call_args.kwargs["body"]
+    assert body.endswith(REAL) and "```suggestion" in body
+    marker = parse_finding_marker(body)
+    assert marker is not None and marker.id == "f-real"

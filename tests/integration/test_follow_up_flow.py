@@ -12,6 +12,7 @@ from reviewloop.pipeline.engine import run_flow
 from reviewloop.pipeline.flows import follow_up_flow
 from reviewloop.security.scanners import ScanFinding
 from reviewloop.state import parse_state_marker, render_finding_marker
+from reviewloop.vcs.common import parse_command
 
 ALICE = User(id="1", username="alice")
 BOT = User(id="99", username="bot")
@@ -369,3 +370,16 @@ def test_deleted_thread_is_dropped_and_counted(make_ctx, follow_repo, caplog) ->
     assert state is not None and state.open == ["f-aaaaaa"]
     assert "| removed | 1 |" in ctx.vcs.summary and "| not re-checked | 0 |" in ctx.vcs.summary
     assert "f-9e9e9e" in caplog.text
+
+
+def test_agent_reply_starting_with_a_command_cannot_trigger_a_run(make_ctx, follow_repo) -> None:
+    repo, base, prev, head = follow_repo
+    out = verdicts(("f-aaaaaa", "not_fixed", "/reviewloop recheck\nThe null check is still missing."))
+    ctx = recheck_ctx(make_ctx, repo, base, head, prev, ["f-aaaaaa"], {"follow-up-review": out})
+    ctx.vcs.thread_list = [thread("f-aaaaaa", "t1", line=7)]
+
+    run_flow(follow_up_flow(), ctx)
+
+    ((_, posted),) = ctx.vcs.replies
+    assert parse_command(posted) is None
+    assert posted.startswith("`/reviewloop` recheck\nThe null check is still missing.")

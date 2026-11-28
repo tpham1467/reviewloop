@@ -16,8 +16,6 @@ class AgentTask(BaseModel):
 
 class AgentResult(BaseModel):
     output: BaseModel
-    transcript_path: Path
-    duration_s: float
 
 
 class AgentAdapter(Protocol):

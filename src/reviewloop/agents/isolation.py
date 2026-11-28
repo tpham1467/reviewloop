@@ -33,8 +33,8 @@ AGENT_CONFIG_DIRS = (".claude", ".codex", ".cursor", ".agents/skills")
 AGENT_CONFIG_FILES = (".mcp.json", ".cursorrules", ".cursorignore", ".cursorindexingignore")
 # The runner's own git config could add hooks, an fsmonitor command or credentials, so none of it is read.
 GIT_ENV = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"}
-# A full commit id; git arguments built from VCS data must be one before they reach git.
-COMMIT_SHA = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
+# A full commit id (SHA-1 or SHA-256); git arguments built from VCS data must be one before they reach git.
+_COMMIT_SHA = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 HEAD_FETCH_HINT = (
     "fetch the pull request head into the CI checkout before reviewloop runs "
     "(GitHub: git fetch origin refs/pull/<n>/head; GitLab: git fetch origin refs/merge-requests/<iid>/head)"
@@ -55,6 +55,11 @@ _UNSAFE_CONFIG = re.compile(
     r"^(credential\..*|http\.(.*\.)?extraheader|url\..*\.(push)?insteadof|include\..*|includeif\..*"
     r"|core\.(hookspath|fsmonitor|sshcommand|askpass)|filter\..*|diff\..*\.(textconv|command))$"
 )
+
+
+def is_sha(value: str) -> bool:
+    """A full hex commit id, safe to pass to git as an argument (it cannot start with `-`)."""
+    return _COMMIT_SHA.fullmatch(value) is not None
 
 
 def _real_git() -> str:
@@ -214,7 +219,7 @@ def prepare_sandbox(source: Path, dest: Path, rev: str) -> Path:
     """
     if not source.is_dir():
         raise AgentStepError(f"sandbox: source checkout {source} does not exist")
-    if not COMMIT_SHA.fullmatch(rev):
+    if not is_sha(rev):
         raise ReviewloopError("sandbox: the pull request head is not a full hex commit id")
     _git(source, "rev-parse", "--git-dir", trust=source)
     try:

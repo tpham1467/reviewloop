@@ -5,6 +5,7 @@ from typing import Literal
 from reviewloop.models import CoverageStatus, FileCoverage, Finding, RunState, Severity
 from reviewloop.output.redact import safe_text
 from reviewloop.state import render_state_marker
+from reviewloop.vcs.common import SUMMARY_MARKER
 
 _PENALTY = {
     Severity.CRITICAL: 4.0,
@@ -12,10 +13,7 @@ _PENALTY = {
     Severity.MEDIUM: 1.0,
     Severity.LOW: 0.25,
 }
-SUMMARY_HEADER = "<!-- reviewloop:summary -->"
 _STATUS = {
-    "reviewing": "Reviewing...",
-    "rechecking": "Re-checking...",
     "done": "Review complete",
     "rechecked": "Re-check complete",
 }
@@ -62,7 +60,7 @@ def render_summary(
     findings: list[Finding],
     coverage: list[FileCoverage],
     state: RunState,
-    status: Literal["reviewing", "rechecking", "done", "rechecked", "failed"],
+    status: Literal["done", "rechecked", "failed"],
     error: str | None = None,
     recheck: Recheck | None = None,
 ) -> str:
@@ -71,7 +69,7 @@ def render_summary(
     status_line = (
         f"Review failed: {_clean(error or 'unknown error', one_line=True)}" if status == "failed" else _STATUS[status]
     )
-    lines = [SUMMARY_HEADER, status_line, ""]
+    lines = [SUMMARY_MARKER, status_line, ""]
     if recheck is None:
         lines += [_clean(overview), "", "| Severity | Count |", "| --- | --- |"]
         for sev in Severity:
@@ -89,7 +87,7 @@ def render_summary(
     failed = [c for c in coverage if c.status is CoverageStatus.FAILED]
     if failed:
         lines += ["", "Failed files:"]
-        lines += [f"- {c.path}: {_clean(c.reason or 'unknown', one_line=True)}" for c in failed]
+        lines += [f"- {_clean(c.path, one_line=True)}: {_clean(c.reason or 'unknown', one_line=True)}" for c in failed]
     if recheck is None:
         lines += ["", f"Score: {score(findings, coverage)}/10"]
     else:
@@ -100,4 +98,4 @@ def render_summary(
 
 def render_notice(text: str, state: RunState) -> str:
     """A one-line summary ("Reviewing...", "Review skipped: ...") that keeps the run-state marker."""
-    return f"{SUMMARY_HEADER}\n{_clean(text, one_line=True)}\n\n{render_state_marker(state)}"
+    return f"{SUMMARY_MARKER}\n{_clean(text, one_line=True)}\n\n{render_state_marker(state)}"

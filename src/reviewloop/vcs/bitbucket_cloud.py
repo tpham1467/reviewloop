@@ -8,8 +8,8 @@ from requests import RequestException
 
 from reviewloop.errors import ReviewloopError
 from reviewloop.models import (
+    COMMAND_PREFIX,
     Anchor,
-    Command,
     Event,
     EventKind,
     Finding,
@@ -21,8 +21,10 @@ from reviewloop.models import (
     User,
 )
 from reviewloop.state import parse_finding_marker, parse_state_marker
+from reviewloop.vcs.bitbucket_http import failure as _failure
+from reviewloop.vcs.bitbucket_http import http_status as _status
+from reviewloop.vcs.common import SUMMARY_MARKER, located, parse_command
 
-SUMMARY_MARKER = "<!-- reviewloop:summary -->"
 _NOT_FOUND = 404
 _FORBIDDEN = 403
 _WRITE_PERMISSIONS = {"admin", "write"}
@@ -36,19 +38,8 @@ _BOT_UUID_HINT = (
 )
 
 
-def _status(exc: BaseException | None) -> int | None:
-    response = getattr(exc, "response", None)
-    return response.status_code if response is not None else None
-
-
 def _norm_uuid(value: str) -> str:
     return value.strip().strip("{}").lower()
-
-
-def _failure(what: str, exc: BaseException) -> ReviewloopError:
-    code = _status(exc)
-    detail = f"HTTP {code}" if code else "network error"
-    return ReviewloopError(f"Bitbucket {what} failed ({detail})")
 
 
 def _user(raw: Mapping[str, Any]) -> User:
@@ -56,11 +47,6 @@ def _user(raw: Mapping[str, Any]) -> User:
         raise ReviewloopError("Bitbucket returned a user without a uuid")
     name = raw.get("nickname") or raw.get("display_name") or raw.get("username") or raw["uuid"]
     return User(id="{" + _norm_uuid(str(raw["uuid"])) + "}", username=str(name))
-
-
-def _located(anchor: Anchor, text: str) -> str:
-    span = f"{anchor.start_line}-{anchor.line}" if anchor.start_line is not None else str(anchor.line)
-    return f"`{anchor.path}:{span}`\n\n{text}"
 
 
 class BitbucketCloudAdapter:
@@ -159,19 +145,18 @@ class BitbucketCloudAdapter:
         return Event(kind=EventKind.OPENED, pr_number=number)
 
     def _command_event(self, command: str, number: int) -> Event:
-        actor = self._env.get("BITBUCKET_STEP_TRIGGERER_UUID", "")
-        try:
-            parsed = Command(command.lower())
-        except ValueError:
-            return Event(kind=EventKind.IGNORED)
-        if not actor:
+        actor = _norm_uuid(self._env.get("BITBUCKET_STEP_TRIGGERER_UUID", ""))
+        # The custom pipeline's COMMAND variable holds the bare command word.
+        parsed = parse_command(f"{COMMAND_PREFIX} {command}")
+        if parsed is None or not actor:
             return Event(kind=EventKind.IGNORED)
         # The pipeline env exposes only the triggerer UUID, not a nickname; the UUID is what
         # can_write needs, and the username is informational, so it repeats the UUID.
+        # Normalized like bot_identity, so the bot check in the CLI compares like with like.
         return Event(
             kind=EventKind.COMMAND,
             command=parsed,
-            actor=User(id=actor, username=actor),
+            actor=User(id=f"{{{actor}}}", username=f"{{{actor}}}"),
             pr_number=number,
         )
 
@@ -199,9 +184,7 @@ class BitbucketCloudAdapter:
             target_branch=dest["branch"]["name"],
             head_sha=head,
             base_sha=base,
-            author=_user(raw["author"]),
             is_fork=source["repository"]["full_name"] != dest["repository"]["full_name"],
-            web_url=raw["links"]["html"]["href"],
             draft=bool(raw.get("draft")),
         )
 
@@ -272,9 +255,9 @@ class BitbucketCloudAdapter:
         return ThreadRef(id=cid, note_id=cid)
 
     def post_inline(self, finding: Finding, anchor: Anchor) -> ThreadRef:
-        located = {"content": {"raw": _located(anchor, finding.text)}}
+        general = {"content": {"raw": located(anchor, finding.text)}}
         if not anchor.in_diff:
-            return self._create_comment(located)
+            return self._create_comment(general)
         key = "to" if anchor.side is Side.NEW else "from"
         payload = {"content": {"raw": finding.text}, "inline": {"path": anchor.path, key: anchor.line}}
         try:
@@ -282,7 +265,7 @@ class BitbucketCloudAdapter:
         except ReviewloopError as exc:
             if _status(exc.__cause__) not in _INLINE_FALLBACK:
                 raise
-            return self._create_comment(located)
+            return self._create_comment(general)
 
     def post_general(self, body: str) -> ThreadRef:
         return self._create_comment({"content": {"raw": body}})

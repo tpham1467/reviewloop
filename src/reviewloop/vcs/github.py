@@ -1,5 +1,4 @@
 import json
-import re
 from pathlib import Path
 from typing import Any, cast
 
@@ -9,7 +8,6 @@ from github import Auth, Github, GithubException
 from reviewloop.errors import ReviewloopError
 from reviewloop.models import (
     Anchor,
-    Command,
     Event,
     EventKind,
     Finding,
@@ -21,8 +19,8 @@ from reviewloop.models import (
     User,
 )
 from reviewloop.state import parse_finding_marker, parse_state_marker
+from reviewloop.vcs.common import SUMMARY_MARKER, located, parse_command, suggestion_fence, with_suggestion
 
-SUMMARY_MARKER = "<!-- reviewloop:summary -->"
 _GRAPHQL_URL = "https://api.github.com/graphql"
 _ACTIONS_BOT = User(id="41898282", username="github-actions[bot]")
 _OPEN_ACTIONS = {"opened", "reopened", "ready_for_review"}
@@ -105,7 +103,8 @@ class GitHubAdapter:
         action = payload.get("action")
         if self._event_name == "pull_request":
             pr: dict[str, Any] = payload.get("pull_request") or {}
-            if action not in _OPEN_ACTIONS or not pr or pr.get("draft"):
+            # Drafts are not filtered here (R12): get-pr-info decides with `review_drafts`.
+            if action not in _OPEN_ACTIONS or not pr:
                 return Event(kind=EventKind.IGNORED)
             return Event(
                 kind=EventKind.OPENED,
@@ -117,7 +116,7 @@ class GitHubAdapter:
             comment: dict[str, Any] = payload.get("comment") or {}
             if action != "created" or "pull_request" not in issue:
                 return Event(kind=EventKind.IGNORED)
-            command = self._parse_command(comment.get("body") or "")
+            command = parse_command(comment.get("body") or "")
             if command is None:
                 return Event(kind=EventKind.IGNORED)
             return Event(
@@ -127,19 +126,6 @@ class GitHubAdapter:
                 pr_number=issue.get("number"),
             )
         return Event(kind=EventKind.IGNORED)
-
-    @staticmethod
-    def _parse_command(body: str) -> Command | None:
-        lines = [line.strip() for line in body.splitlines() if line.strip()]
-        if not lines:
-            return None
-        parts = lines[0].split()
-        if len(parts) != 2 or parts[0] != "/reviewloop":
-            return None
-        try:
-            return Command(parts[1])
-        except ValueError:
-            return None
 
     @staticmethod
     def _user(raw: Any) -> User | None:
@@ -170,9 +156,7 @@ class GitHubAdapter:
             target_branch=pr.base.ref,
             head_sha=pr.head.sha,
             base_sha=pr.base.sha,
-            author=User(id=str(pr.user.id), username=pr.user.login),
             is_fork=is_fork,
-            web_url=pr.html_url,
             draft=bool(pr.draft),
         )
 
@@ -310,7 +294,7 @@ class GitHubAdapter:
                 span = anchor.line - (anchor.start_line or anchor.line) + 1
                 block = self.suggestion_block(anchor, finding.suggestion, span)
                 if block is not None:
-                    body = f"{body}\n\n{block}"
+                    body = with_suggestion(body, block)
             kwargs.update(line=anchor.line, side=side)
             if anchor.start_line is not None:
                 kwargs.update(start_line=anchor.start_line, start_side=side)
@@ -322,9 +306,8 @@ class GitHubAdapter:
             if exc.status != 422:
                 raise
             # GitHub rejects positions it cannot place (for example a range crossing hunks).
-            where = f"{anchor.start_line}-{anchor.line}" if anchor.start_line is not None else str(anchor.line)
             # A general comment cannot apply a suggestion block, so use the bare text.
-            return self.post_general(f"`{anchor.path}:{where}`\n\n{finding.text}")
+            return self.post_general(located(anchor, finding.text))
         return ThreadRef(id=str(comment.id), note_id=str(comment.id))
 
     def post_general(self, body: str) -> ThreadRef:
@@ -378,8 +361,7 @@ class GitHubAdapter:
     def suggestion_block(self, anchor: Anchor, code: str, replaced_lines: int = 1) -> str | None:
         if anchor.side == Side.OLD or not anchor.in_diff or replaced_lines > _MAX_SUGGESTION_LINES:
             return None
-        longest = max((len(run) for run in re.findall(r"`+", code)), default=0)
-        fence = "`" * max(3, longest + 1)
+        fence = suggestion_fence(code)
         return f"{fence}suggestion\n{code}\n{fence}"
 
     def read_file(self, path: str, ref: str) -> str | None:

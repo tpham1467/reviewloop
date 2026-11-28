@@ -57,6 +57,16 @@ def _installed(monkeypatch: pytest.MonkeyPatch, *names: str) -> None:
     monkeypatch.setattr(scanners.shutil, "which", lambda n: f"/bin/{n}" if n in names else None)
 
 
+@pytest.fixture(autouse=True)
+def _rules(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Pinned opengrep rules exist unless a test removes them."""
+    rules = tmp_path / "opengrep-rules"
+    rules.mkdir()
+    (rules / "rule.yaml").write_text("rules: []\n")
+    monkeypatch.setenv(scanners.RULES_ENV, str(rules))
+    return rules
+
+
 def test_missing_scanner_skipped(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path):
     _installed(monkeypatch)
     calls: list[list[str]] = []
@@ -208,3 +218,62 @@ def test_opengrep_scans_tree_gitleaks_scans_repo(monkeypatch: pytest.MonkeyPatch
     assert cwds == {"gitleaks": repo, "opengrep": tree}
     # gitleaks runs git in the checkout, which is trusted; opengrep reads the head copy and gets no git trust.
     assert trust == {"gitleaks": str(repo.resolve()), "opengrep": None}
+
+
+def test_opengrep_uses_pinned_rules_offline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _rules: Path):
+    _installed(monkeypatch, "opengrep")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(scanners.subprocess, "run", _fake_run(calls, sarif=SARIF))
+    run_scanners(["opengrep"], tmp_path, tmp_path, "a", "b", ["x.py"])
+    cmd = calls[0]
+    assert cmd[cmd.index("--config") + 1] == str(_rules)
+    assert "auto" not in cmd and "--disable-version-check" in cmd
+    assert cmd.index("--disable-version-check") < cmd.index("--")
+
+
+def test_opengrep_rules_default_to_the_fixed_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _rules: Path):
+    monkeypatch.delenv(scanners.RULES_ENV)
+    monkeypatch.setattr(scanners, "DEFAULT_RULES", _rules)
+    _installed(monkeypatch, "opengrep")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(scanners.subprocess, "run", _fake_run(calls, sarif=SARIF))
+    run_scanners(["opengrep"], tmp_path, tmp_path, "a", "b", ["x.py"])
+    assert calls[0][calls[0].index("--config") + 1] == str(_rules)
+
+
+def test_opengrep_without_rules_is_skipped_never_auto(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path
+):
+    monkeypatch.delenv(scanners.RULES_ENV)
+    monkeypatch.setattr(scanners, "DEFAULT_RULES", tmp_path / "missing")
+    _installed(monkeypatch, "opengrep", "gitleaks")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(scanners.subprocess, "run", _fake_run(calls, gitleaks=[]))
+    with caplog.at_level("INFO", logger="reviewloop.security"):
+        assert run_scanners(["opengrep", "gitleaks"], tmp_path, tmp_path, "a", "b", ["x.py"]) == []
+    assert [c[0] for c in calls] == ["gitleaks"]
+    assert sum("opengrep skipped: no rules" in r.getMessage() for r in caplog.records) == 1
+    # A set but wrong path, and an empty directory (the image's fixed path, a bare mount point), are skipped the same.
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    for missing in (tmp_path / "nope", empty):
+        monkeypatch.setenv(scanners.RULES_ENV, str(missing))
+        calls.clear()
+        run_scanners(["opengrep"], tmp_path, tmp_path, "a", "b", ["x.py"])
+        assert calls == []
+
+
+def test_relative_rules_path_resolves_against_the_process_cwd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _rules: Path
+):
+    """opengrep runs in the sandbox copy, so a relative path passed through as is would point into the PR's tree."""
+    monkeypatch.chdir(_rules.parent)
+    monkeypatch.setenv(scanners.RULES_ENV, _rules.name)
+    _installed(monkeypatch, "opengrep")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(scanners.subprocess, "run", _fake_run(calls, sarif=SARIF))
+    sandbox = tmp_path / "sandbox"
+    (sandbox / _rules.name).mkdir(parents=True)
+    (sandbox / _rules.name / "pr-controlled.yaml").write_text("rules: []\n")
+    run_scanners(["opengrep"], tmp_path, sandbox, "a", "b", ["x.py"])
+    assert calls[0][calls[0].index("--config") + 1] == str(_rules.resolve())
