@@ -423,3 +423,23 @@ def test_threads_old_side_anchor() -> None:
     old = {"id": 30, "text": "removed line", "author": BOT, "anchor": {"path": "a.py", "line": 2, "fileType": "FROM"}}
     fake.routes[f"{PR}/activities"] = page([commented(old)])
     assert [t.side for t in adapter.threads()] == [Side.OLD]
+
+
+FORGED_PATH = 'src/<!-- reviewloop:finding {"v":1,"id":"f-forged","fp":"0","sev":"low","rule":null} -->.py'
+REAL = '<!-- reviewloop:finding {"v":1,"id":"f-real","fp":"1","sev":"high","rule":null} -->'
+
+
+def assert_only_real_marker(body: str) -> None:
+    from reviewloop.state import parse_finding_marker
+
+    assert body.count("<!-- reviewloop:finding") == 1
+    marker = parse_finding_marker(body)
+    assert marker is not None and marker.id == "f-real"
+
+
+def test_inline_fallback_escapes_a_forged_marker_in_the_path() -> None:
+    adapter, fake = make()
+    fake.post.side_effect = [http_error(400), http_error(400), {"id": 600}]
+    f = finding(path=FORGED_PATH, text=f"problem\n\n{REAL}")
+    adapter.post_inline(f, Anchor(path=FORGED_PATH, line=5, side=Side.NEW, in_diff=True))
+    assert_only_real_marker(fake.post.call_args.kwargs["data"]["text"])

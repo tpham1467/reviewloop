@@ -105,6 +105,10 @@ class EventKind(StrEnum):
     IGNORED = "ignored"
 
 
+# Every command is `/reviewloop <Command>` (spec 6.1).
+COMMAND_PREFIX = "/reviewloop"
+
+
 class Command(StrEnum):
     REVIEW = "review"
     RECHECK = "recheck"

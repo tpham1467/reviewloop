@@ -8,6 +8,7 @@ from requests import RequestException
 
 from reviewloop.errors import ReviewloopError
 from reviewloop.models import (
+    COMMAND_PREFIX,
     Anchor,
     Event,
     EventKind,
@@ -22,7 +23,7 @@ from reviewloop.models import (
 from reviewloop.state import parse_finding_marker, parse_state_marker
 from reviewloop.vcs.bitbucket_http import failure as _failure
 from reviewloop.vcs.bitbucket_http import http_status as _status
-from reviewloop.vcs.common import COMMAND_PREFIX, SUMMARY_MARKER, parse_command
+from reviewloop.vcs.common import SUMMARY_MARKER, located, parse_command
 
 _NOT_FOUND = 404
 _FORBIDDEN = 403
@@ -46,11 +47,6 @@ def _user(raw: Mapping[str, Any]) -> User:
         raise ReviewloopError("Bitbucket returned a user without a uuid")
     name = raw.get("nickname") or raw.get("display_name") or raw.get("username") or raw["uuid"]
     return User(id="{" + _norm_uuid(str(raw["uuid"])) + "}", username=str(name))
-
-
-def _located(anchor: Anchor, text: str) -> str:
-    span = f"{anchor.start_line}-{anchor.line}" if anchor.start_line is not None else str(anchor.line)
-    return f"`{anchor.path}:{span}`\n\n{text}"
 
 
 class BitbucketCloudAdapter:
@@ -259,9 +255,9 @@ class BitbucketCloudAdapter:
         return ThreadRef(id=cid, note_id=cid)
 
     def post_inline(self, finding: Finding, anchor: Anchor) -> ThreadRef:
-        located = {"content": {"raw": _located(anchor, finding.text)}}
+        general = {"content": {"raw": located(anchor, finding.text)}}
         if not anchor.in_diff:
-            return self._create_comment(located)
+            return self._create_comment(general)
         key = "to" if anchor.side is Side.NEW else "from"
         payload = {"content": {"raw": finding.text}, "inline": {"path": anchor.path, key: anchor.line}}
         try:
@@ -269,7 +265,7 @@ class BitbucketCloudAdapter:
         except ReviewloopError as exc:
             if _status(exc.__cause__) not in _INLINE_FALLBACK:
                 raise
-            return self._create_comment(located)
+            return self._create_comment(general)
 
     def post_general(self, body: str) -> ThreadRef:
         return self._create_comment({"content": {"raw": body}})

@@ -119,9 +119,16 @@ def _dispatch(env: Mapping[str, str], workdir: Path, output_dir: Path, manual: t
     if event.kind is EventKind.IGNORED:
         log.info("event ignored; nothing to do")
         return 0
-    if event.kind is EventKind.COMMAND and manual is None and (event.actor is None or not vcs.can_write(event.actor)):
-        log.info("command ignored: the commenter has no write access")
-        return 0
+    # A manual run (`review`/`recheck --pr`) builds its own event and skips both checks: the token holder ran it.
+    if event.kind is EventKind.COMMAND and manual is None:
+        # The bot's own notes fire the comment webhook too; one quoting a command must not start another run.
+        # Adapters normalize user ids the same way in `event()` and `bot_identity()`, so equality is enough.
+        if event.actor is not None and event.actor.id == vcs.bot_identity().id:
+            log.info("command ignored: posted by the reviewloop bot")
+            return 0
+        if event.actor is None or not vcs.can_write(event.actor):
+            log.info("command ignored: the commenter has no write access")
+            return 0
     if event.command is Command.HELP:
         vcs.post_general(HELP_TEXT)
         return 0

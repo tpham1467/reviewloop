@@ -19,7 +19,7 @@ from reviewloop.models import (
     User,
 )
 from reviewloop.state import parse_finding_marker, parse_state_marker
-from reviewloop.vcs.common import SUMMARY_MARKER, parse_command, suggestion_fence
+from reviewloop.vcs.common import SUMMARY_MARKER, located, parse_command, suggestion_fence
 
 _GRAPHQL_URL = "https://api.github.com/graphql"
 _ACTIONS_BOT = User(id="41898282", username="github-actions[bot]")
@@ -103,7 +103,8 @@ class GitHubAdapter:
         action = payload.get("action")
         if self._event_name == "pull_request":
             pr: dict[str, Any] = payload.get("pull_request") or {}
-            if action not in _OPEN_ACTIONS or not pr or pr.get("draft"):
+            # Drafts are not filtered here (R12): get-pr-info decides with `review_drafts`.
+            if action not in _OPEN_ACTIONS or not pr:
                 return Event(kind=EventKind.IGNORED)
             return Event(
                 kind=EventKind.OPENED,
@@ -305,9 +306,8 @@ class GitHubAdapter:
             if exc.status != 422:
                 raise
             # GitHub rejects positions it cannot place (for example a range crossing hunks).
-            where = f"{anchor.start_line}-{anchor.line}" if anchor.start_line is not None else str(anchor.line)
             # A general comment cannot apply a suggestion block, so use the bare text.
-            return self.post_general(f"`{anchor.path}:{where}`\n\n{finding.text}")
+            return self.post_general(located(anchor, finding.text))
         return ThreadRef(id=str(comment.id), note_id=str(comment.id))
 
     def post_general(self, body: str) -> ThreadRef:

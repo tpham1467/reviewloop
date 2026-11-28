@@ -87,7 +87,7 @@ def render_summary(
     failed = [c for c in coverage if c.status is CoverageStatus.FAILED]
     if failed:
         lines += ["", "Failed files:"]
-        lines += [f"- {c.path}: {_clean(c.reason or 'unknown', one_line=True)}" for c in failed]
+        lines += [f"- {_clean(c.path, one_line=True)}: {_clean(c.reason or 'unknown', one_line=True)}" for c in failed]
     if recheck is None:
         lines += ["", f"Score: {score(findings, coverage)}/10"]
     else:

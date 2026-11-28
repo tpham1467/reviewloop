@@ -28,7 +28,7 @@ from reviewloop.models import (
 from reviewloop.state import parse_finding_marker, parse_state_marker
 from reviewloop.vcs.bitbucket_http import failure as _failure
 from reviewloop.vcs.bitbucket_http import http_status as _status
-from reviewloop.vcs.common import SUMMARY_MARKER, parse_command
+from reviewloop.vcs.common import SUMMARY_MARKER, located, parse_command
 
 _NOT_FOUND = 404
 _REJECTED_ANCHOR = frozenset({400, 404, 409})
@@ -241,10 +241,9 @@ class BitbucketDCAdapter:
         return ThreadRef(id=str(created["id"]), note_id=str(created["id"]))
 
     def post_inline(self, finding: Finding, anchor: Anchor) -> ThreadRef:
-        span = f"{anchor.start_line}-{anchor.line}" if anchor.start_line is not None else str(anchor.line)
-        located = f"`{anchor.path}:{span}`\n\n{finding.text}"
+        general = located(anchor, finding.text)
         if not anchor.in_diff:
-            return self._create(located)
+            return self._create(general)
         base = {"path": anchor.path, "line": anchor.line}
         if anchor.side is Side.NEW:
             # A NEW-side line may be unchanged context rather than an added line.
@@ -257,7 +256,7 @@ class BitbucketDCAdapter:
             except ReviewloopError as exc:
                 if _status(exc.__cause__) not in _REJECTED_ANCHOR:
                     raise
-        return self._create(located)
+        return self._create(general)
 
     def post_general(self, body: str) -> ThreadRef:
         return self._create(body)

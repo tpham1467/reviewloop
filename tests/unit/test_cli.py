@@ -126,6 +126,20 @@ def test_command_from_reader_ignored(ci: Any, monkeypatch: pytest.MonkeyPatch) -
     assert ci.vcs.summaries == [] and ci.vcs.general == []
 
 
+@pytest.mark.parametrize("command", [Command.REVIEW, Command.RECHECK, Command.HELP])
+def test_command_from_bot_ignored(ci: Any, monkeypatch: pytest.MonkeyPatch, command: Command) -> None:
+    """A note the bot posted (its own reply quoting a command) fires the comment webhook too; it must not loop."""
+    bot = ci.vcs.bot_identity()
+    with_event(ci.vcs, Event(kind=EventKind.COMMAND, command=command, actor=bot, pr_number=7))
+    ci.vcs.can_write = raise_(AssertionError("no permission lookup for the bot's own note"))
+    monkeypatch.setattr(flows, "initial_flow", lambda: pytest.fail("flow must not run"))
+    monkeypatch.setattr(flows, "follow_up_flow", lambda: pytest.fail("flow must not run"))
+    result = ci.invoke("run")
+    assert result.exit_code == 0
+    assert result.stderr.count("command ignored: posted by the reviewloop bot") == 1
+    assert ci.vcs.summaries == [] and ci.vcs.general == []
+
+
 def test_command_without_actor_ignored(ci: Any) -> None:
     with_event(ci.vcs, Event(kind=EventKind.COMMAND, command=Command.HELP, pr_number=7))
     assert ci.invoke("run").exit_code == 0

@@ -22,7 +22,7 @@ from reviewloop.models import (
     User,
 )
 from reviewloop.state import parse_finding_marker
-from reviewloop.vcs.common import SUMMARY_MARKER, parse_command, suggestion_fence
+from reviewloop.vcs.common import SUMMARY_MARKER, located, parse_command, suggestion_fence
 
 _DEVELOPER = 30
 _MAX_SUGGESTION_LINES = 30
@@ -207,10 +207,9 @@ class GitLabAdapter:
 
     def post_inline(self, finding: Finding, anchor: Anchor) -> ThreadRef:
         mr = self._mr(self._pr_number())
-        span = f"{anchor.start_line}-{anchor.line}" if anchor.start_line is not None else str(anchor.line)
-        located = f"`{anchor.path}:{span}`\n\n{finding.text}"
+        general = {"body": located(anchor, finding.text)}
         if not anchor.in_diff:
-            return self._create_discussion(mr, {"body": located})
+            return self._create_discussion(mr, general)
         refs = mr.diff_refs
         position: dict[str, Any] = {
             "position_type": "text",
@@ -225,7 +224,7 @@ class GitLabAdapter:
         try:
             return self._create_discussion(mr, {"body": self._finding_body(finding, anchor), "position": position})
         except GitlabCreateError:
-            return self._create_discussion(mr, {"body": located})
+            return self._create_discussion(mr, general)
 
     @staticmethod
     def _create_discussion(mr: Any, data: dict[str, Any]) -> ThreadRef:

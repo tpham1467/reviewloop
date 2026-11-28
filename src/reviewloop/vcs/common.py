@@ -1,11 +1,12 @@
-"""Text conventions every VCS adapter shares: the command syntax, the summary marker and the suggestion fence."""
+"""Text conventions every VCS adapter shares: the command syntax, the summary marker, the location prefix of a
+finding posted as a general comment and the suggestion fence."""
 
 import re
 
-from reviewloop.models import Command
+from reviewloop.models import COMMAND_PREFIX, Anchor, Command
+from reviewloop.output.redact import safe_text
 
 SUMMARY_MARKER = "<!-- reviewloop:summary -->"
-COMMAND_PREFIX = "/reviewloop"
 
 
 def parse_command(body: str) -> Command | None:
@@ -18,6 +19,12 @@ def parse_command(body: str) -> Command | None:
         return Command(parts[1])
     except ValueError:
         return None
+
+
+def located(anchor: Anchor, text: str) -> str:
+    """`text` as a general comment that names its place; the file name is untrusted, so it cannot forge a marker."""
+    span = f"{anchor.start_line}-{anchor.line}" if anchor.start_line is not None else str(anchor.line)
+    return f"`{safe_text(anchor.path)}:{span}`\n\n{text}"
 
 
 def suggestion_fence(code: str) -> str:

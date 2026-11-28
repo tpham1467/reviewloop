@@ -33,11 +33,13 @@ def render_state_marker(s: RunState) -> str:
 
 
 def _parse(pattern: re.Pattern[str], model: type[_M], body: str) -> _M | None:
-    m = pattern.search(body)
-    if m is None:
+    """The LAST marker in `body`: reviewloop appends its own marker after any text it renders, so an earlier match
+    is a forgery in a file name or quoted text that escaped neutralizing."""
+    matches = pattern.findall(body)
+    if not matches:
         return None
     try:
-        return model.model_validate(json.loads(m.group(1)))
+        return model.model_validate(json.loads(matches[-1]))
     except (ValueError, RecursionError):
         return None
 

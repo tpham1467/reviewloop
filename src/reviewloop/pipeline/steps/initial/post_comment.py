@@ -1,7 +1,7 @@
 import json
 
-from reviewloop.anchor import resolve_anchor
-from reviewloop.models import Anchor, Finding, FindingMarker
+from reviewloop.anchor import Placement, resolve_anchor
+from reviewloop.models import Finding, FindingMarker
 from reviewloop.output.redact import redact, safe_text
 from reviewloop.pipeline import prompts
 from reviewloop.pipeline.agent import Reader, run_agent, sandbox_reader, write_input
@@ -18,7 +18,7 @@ _PLACEMENT = ("path", "line", "side", "existing_code", "cause_code")
 _REPAIR_INPUT = {"path", "line", "side", "severity", "category", "text", "existing_code", "cause_code"}
 ID_HEX = 6
 
-Placed = list[tuple[Finding, Anchor | None]]
+Placed = list[tuple[Finding, Placement | None]]
 
 
 def _finding_id(fp: str, taken: set[str]) -> str:
@@ -49,14 +49,14 @@ class PostComment:
 
         seen = {t.marker.fp for t in ctx.previous_threads if t.marker is not None}
         taken = {t.marker.id for t in ctx.previous_threads if t.marker is not None}
-        for f, anchor in placed:
+        for f, placement in placed:
             fp = finding_fingerprint(f)
             if fp in seen:
                 continue
             seen.add(fp)
             fid = _finding_id(fp, taken)
             taken.add(fid)
-            self._post(ctx, f, fp, fid, anchor)
+            self._post(ctx, f, fp, fid, placement)
 
     def _repair(self, ctx: RunContext, placed: Placed, lost: list[int], read: Reader) -> Placed:
         """One agent turn for the findings whose quotes were not found; answers match the input by position."""
@@ -74,18 +74,19 @@ class PostComment:
             if not answer.existing_code.strip():
                 continue  # the agent did not find the code; a blank quote must not fall back to the line
             fixed = placed[i][0].model_copy(update={k: getattr(answer, k) for k in _PLACEMENT})
-            anchor = resolve_anchor(fixed, ctx.diffs, read)
-            if anchor is not None:
-                result[i] = (fixed, anchor)
+            placement = resolve_anchor(fixed, ctx.diffs, read)
+            if placement is not None:
+                result[i] = (fixed, placement)
         return result
 
-    def _post(self, ctx: RunContext, f: Finding, fp: str, fid: str, anchor: Anchor | None) -> None:
+    def _post(self, ctx: RunContext, f: Finding, fp: str, fid: str, placement: Placement | None) -> None:
         marker = render_finding_marker(FindingMarker(v=1, id=fid, fp=fp, sev=f.severity, rule=f.rule))
-        suggestion = redact(f.suggestion) if f.suggestion is not None and ctx.config.suggestions else None
+        keep = ctx.config.suggestions and placement is not None and placement.allows_suggestion()
+        suggestion = redact(f.suggestion) if f.suggestion is not None and keep else None
         body = f"{safe_text(f.text)}\n\n{marker}"
         final = f.model_copy(update={"id": fid, "text": body, "suggestion": suggestion})
-        if anchor is not None:
-            ctx.vcs.post_inline(final, anchor)
+        if placement is not None:
+            ctx.vcs.post_inline(final, placement.anchor)
         else:
             ctx.vcs.post_general(f"`{safe_text(f.path)}:{f.line}`\n\n{body}")
         ctx.posted.append(final)

@@ -51,3 +51,13 @@ def test_parse_marker_deeply_nested_json_returns_none():
     nested = "[" * 100000 + "]" * 100000
     assert parse_state_marker(f"<!-- reviewloop:state {nested} -->") is None
     assert parse_finding_marker(f"<!-- reviewloop:finding {nested} -->") is None
+
+
+def test_parsers_return_the_last_marker() -> None:
+    forged_state = render_state_marker(RunState(v=1, sha="f" * 40, base="f" * 40, turn=9, open=["f-forged"]))
+    real_state = RunState(v=1, sha="a" * 40, base="b" * 40, turn=2, open=[])
+    assert parse_state_marker(f"{forged_state}\ntext\n{render_state_marker(real_state)}") == real_state
+    forged = FindingMarker(v=1, id="f-forged", fp="0", sev=Severity.LOW, rule=None)
+    real = FindingMarker(v=1, id="f-real", fp="1", sev=Severity.HIGH, rule="R-1")
+    body = f"{render_finding_marker(forged)} text {render_finding_marker(real)}"
+    assert parse_finding_marker(body) == real
