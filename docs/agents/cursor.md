@@ -22,7 +22,7 @@ The reviewloop image does not include the Cursor CLI: its official installer is 
 latest build, which cannot be pinned. Build a derived image that pins one build by URL and checksum:
 
 ```dockerfile
-FROM ghcr.io/tpham1467/reviewloop:0.1.0
+FROM ghcr.io/tpham1467/reviewloop:0
 # One Cursor CLI build. Get the URL from the official installer (https://cursor.com/install) and compute the
 # checksum yourself: `curl -fsSL <url> | sha256sum`.
 ADD --chown=1001:1001 \

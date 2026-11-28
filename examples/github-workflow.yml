@@ -3,7 +3,7 @@ name: reviewloop
 
 on:
   pull_request:
-    # No `synchronize`: a push triggers nothing; run `/reviewloop recheck` after fixing.
+    # No `synchronize`: reviewloop ignores pushes, and with cancel-in-progress each push would cancel a running review.
     types: [opened, reopened, ready_for_review]
   issue_comment:
     types: [created]
@@ -14,11 +14,13 @@ permissions:
 
 jobs:
   review:
-    # Pull request events, or a `/reviewloop ...` comment on a pull request. reviewloop checks the commenter's access.
+    # Pull request events, or a `/reviewloop ...` comment on a pull request by a user with write access. The filter
+    # keeps other users from cancelling a running review; reviewloop still checks the commenter's access itself.
     if: >-
       github.event_name == 'pull_request' ||
-      (github.event.issue.pull_request && startsWith(github.event.comment.body, '/reviewloop'))
-    # Job-level concurrency is evaluated after `if`, so an ordinary comment never cancels a running review.
+      (github.event.issue.pull_request && startsWith(github.event.comment.body, '/reviewloop') &&
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+    # Job-level concurrency is evaluated after `if`: only runs that pass the filter cancel a running review.
     concurrency:
       group: reviewloop-${{ github.event.pull_request.number || github.event.issue.number }}
       cancel-in-progress: true

@@ -14,7 +14,8 @@ resolves the fixed threads.
 
 Code `2` is an infrastructure error: the agent failed or timed out, the VCS API failed, or a file could not be
 reviewed. The summary comment names the failed step or files, and the job log has the details (secrets redacted). Set
-`REVIEWLOOP_KEEP_WORKDIR=1` to keep the agent's inputs and transcripts in the work directory.
+`REVIEWLOOP_KEEP_WORKDIR=1` to keep the agent's inputs and transcripts in the work directory: `$RUNNER_TEMP/reviewloop-*`
+with the GitHub Action (upload it as an artifact to read it), `$CI_BUILDS_DIR/reviewloop-*` on GitLab.
 
 ## "get-diff: git merge-base failed"
 
@@ -24,9 +25,14 @@ your own variables.
 
 ## "detected dubious ownership in repository"
 
-git refuses a checkout owned by another user. The action runs the image as the runner's user; the GitLab component
-runs it as root, the owner of the runner's checkout. If you run the image yourself, run it as the checkout's owner
-(`docker run --user "$(id -u):$(id -g)" ...`).
+git refuses a repository owned by another user. The image runs as uid 1001, and reviewloop runs its git commands with
+global and system config disabled, marking exactly the CI checkout path as `safe.directory`: never `*`, never the agent
+sandbox. One step is not covered yet: the local clone that builds the agent sandbox, because git does not pass that
+setting on to the clone's `upload-pack`. Until it is, run the container as the checkout's owner:
+
+- the GitHub Action already runs it as the runner's user;
+- the GitLab component runs it as root, the owner of the runner's checkout;
+- elsewhere, `docker run --user "$(stat -c %u:%g .)" ...` from the checkout.
 
 ## My GitLab merge request has no reviewloop job
 

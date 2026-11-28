@@ -70,9 +70,8 @@ COPY --from=agents /usr/local/bin/node /usr/local/bin/node
 COPY --from=agents /opt/agents /opt/agents
 COPY --from=app /opt/reviewloop /opt/reviewloop
 
-# The CI checkout must be owned by the uid the container runs as: reviewloop runs git with global and system config
-# disabled, so git refuses a checkout owned by another user ("dubious ownership"). The action and the GitLab
-# component arrange that; see docs/faq.md.
+# Runs as uid 1001. reviewloop runs git with global and system config disabled and trusts exactly the CI checkout
+# path through safe.directory, never `*` and never the agent sandbox. See docs/faq.md.
 ENV PATH=/opt/reviewloop/bin:/opt/agents/bin:${PATH} \
     HOME=/home/reviewloop \
     PYTHONDONTWRITEBYTECODE=1 \

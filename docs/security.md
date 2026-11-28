@@ -64,8 +64,10 @@ job. reviewloop cannot remove them, because the job may need them. An agent whos
 
 - base images pinned by digest; gitleaks and opengrep pinned by version and sha256; Node and the agent CLIs pinned by
   exact version;
-- runs as a non-root user (uid 1001); the GitLab component runs it as root because the runner's checkout is owned by
-  root;
+- runs as a non-root user (uid 1001); reviewloop trusts only the CI checkout path for its git calls
+  (`safe.directory`). The GitLab component still runs the image as root for the sandbox clone of the root-owned
+  checkout (see [FAQ](faq.md#detected-dubious-ownership-in-repository)); the GitHub Action runs it as the runner's
+  user with all capabilities dropped and `no-new-privileges`;
 - release images are signed with cosign and carry an SBOM and SLSA provenance.
 
 ## Reporting a vulnerability

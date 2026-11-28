@@ -52,7 +52,7 @@ runs:
         export REVIEWLOOP_AGENT="$INPUT_AGENT" REVIEWLOOP_MODEL="$INPUT_MODEL" REVIEWLOOP_CONFIG_PATH="$INPUT_CONFIG_PATH"
         args=(
           -e GITHUB_ACTIONS -e GITHUB_EVENT_NAME -e GITHUB_EVENT_PATH -e GITHUB_REPOSITORY -e GITHUB_TOKEN
-          -e REVIEWLOOP_AGENT -e REVIEWLOOP_MODEL -e REVIEWLOOP_CONFIG_PATH
+          -e REVIEWLOOP_AGENT -e REVIEWLOOP_MODEL -e REVIEWLOOP_CONFIG_PATH -e RUNNER_TEMP
         )
         # Agent, tracker and reviewloop settings set on the calling step: passed only when set, by name only.
         while IFS= read -r name; do
@@ -68,9 +68,14 @@ runs:
           esac
         done < <(compgen -e)
 
+        # --user: the workspace belongs to the runner user, and reviewloop writes reviewloop.json/.sarif into it and its
+        # work dir into RUNNER_TEMP. That uid is 1001 on GitHub-hosted runners (the image's own) but not on every
+        # self-hosted runner, so the container takes the runner's uid instead of relying on the image default.
         docker run --rm \
           --user "$(id -u):$(id -g)" \
+          --cap-drop=ALL --security-opt no-new-privileges \
           -v "${GITHUB_WORKSPACE}:${GITHUB_WORKSPACE}" -w "${GITHUB_WORKSPACE}" \
           -v "${GITHUB_EVENT_PATH}:${GITHUB_EVENT_PATH}:ro" \
+          -v "${RUNNER_TEMP}:${RUNNER_TEMP}" \
           "${args[@]}" \
           "ghcr.io/tpham1467/reviewloop:${version}"

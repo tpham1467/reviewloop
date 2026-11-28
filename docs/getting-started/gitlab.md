@@ -21,8 +21,8 @@ comments. `CI_JOB_TOKEN` cannot post notes, so a project access token is require
     Do not store tokens as **File** variables. GitLab writes them as plain files under `<builds>/<project>.tmp/`,
     next to the checkout, where they stay for the whole job. See [Security](../security.md#gitlab-file-type-variables).
 
-Leave **Protect variable** unchecked unless every target branch is protected: protected variables are not passed to
-pipelines of unprotected branches.
+Leave **Protect variable** unchecked. Merge request pipelines run on the source branch, which is usually not
+protected, and protected variables are not passed to them.
 
 ## 3. Include the component
 
@@ -30,24 +30,31 @@ Add to `.gitlab-ci.yml`:
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/tpham1467/reviewloop/reviewloop@0.1.0
+  - component: $CI_SERVER_FQDN/tpham1467/reviewloop/reviewloop@0
     inputs:
       agent: claude-code
 ```
 
-On a self-managed instance without access to the GitLab.com catalog, mirror the reviewloop repository into your
-instance and point `component:` at that project.
+`@0` selects the latest published `0.x.y` release from the CI/CD Catalog; pin an exact version such as `@0.1.0` to
+stay on one. On a self-managed instance without access to the GitLab.com catalog, mirror the reviewloop repository
+into your instance and reference an exact tag of that project (partial versions only work for published Catalog
+components).
 
 | Input | Default | Meaning |
 | --- | --- | --- |
 | `agent` | `claude-code` | Agent CLI. `codex` and `cursor` are experimental |
 | `model` | empty | Model name passed to the CLI as is |
-| `image_tag` | the component's version | Tag of `ghcr.io/tpham1467/reviewloop` |
+| `image_tag` | the component release's exact version | Tag of `ghcr.io/tpham1467/reviewloop` |
 | `stage` | `test` | Stage of the `reviewloop` job |
 
 The job runs on `merge_request_event` and `trigger` pipelines. It is not `interruptible`: command pipelines all run
 on one ref, so auto-cancel would stop reviews of other merge requests. Two runs on one merge request do not collide:
 each re-reads the run state before posting and the later one stops.
+
+The job runs the image as root (`image: docker: user: "0"`, Docker and Kubernetes executors). The runner clones the
+checkout as root, and git refuses a repository owned by another user. reviewloop trusts exactly the checkout path for
+its own git calls, but the local clone that builds the agent sandbox does not pass that setting on yet, so the
+override stays until it does.
 
 ## 4. Enable merge request pipelines
 
@@ -72,6 +79,26 @@ merge request pipelines (every push) start the job too; it sees the summary note
 
 GitLab CI does not start on comments, so a webhook starts a trigger pipeline.
 
+!!! warning "Every comment starts a pipeline with all your jobs"
+    The webhook fires on every comment on every merge request and issue, and each one creates a full `trigger`
+    pipeline on the default branch: every job whose rules allow it runs, deploy jobs included. Before adding the
+    webhook, keep your other jobs out of trigger pipelines by adding this rule first to each of them:
+
+    ```yaml
+    rules:
+      - if: $CI_PIPELINE_SOURCE == "trigger"
+        when: never
+      # ... the job's existing rules, or `- when: on_success`
+    ```
+
+    See [`examples/gitlab-ci.yml`](https://github.com/tpham1467/reviewloop/blob/main/examples/gitlab-ci.yml). If
+    you already use trigger pipelines for something else, key those jobs on a variable your other trigger callers set
+    instead.
+
+    A marker variable in the webhook URL (`variables[REVIEWLOOP]=1`) is not used: GitLab refuses a trigger that sets
+    pipeline variables unless the trigger token's owner may set them (project setting **Minimum role to use pipeline
+    variables**, `no_one_allowed` by default for new GitLab.com projects).
+
 1. **Settings > CI/CD > Pipeline trigger tokens > Add new token.** Copy the token.
 2. **Settings > Webhooks > Add new webhook**:
     - **URL**:
@@ -81,9 +108,9 @@ GitLab CI does not start on comments, so a webhook starts a trigger pipeline.
     - **Trigger**: **Comments** only.
 3. Save, then comment `/reviewloop help` on a merge request to test it.
 
-The job reads the merge request from `TRIGGER_PAYLOAD`, checks out its target branch and fetches its head. Every
-comment starts a pipeline; comments that are not a `/reviewloop` command finish within seconds without calling an
-agent.
+The job reads the merge request from `TRIGGER_PAYLOAD`, checks out its target branch and fetches its head. In the
+pipeline of a comment that is not a `/reviewloop` command, the reviewloop job finishes within seconds without calling
+an agent. A failed fetch or checkout exits `2`, like any infrastructure error.
 
 | Command | Effect |
 | --- | --- |

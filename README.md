@@ -26,7 +26,8 @@ jobs:
   review:
     if: >-
       github.event_name == 'pull_request' ||
-      (github.event.issue.pull_request && startsWith(github.event.comment.body, '/reviewloop'))
+      (github.event.issue.pull_request && startsWith(github.event.comment.body, '/reviewloop') &&
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
     concurrency:
       group: reviewloop-${{ github.event.pull_request.number || github.event.issue.number }}
       cancel-in-progress: true
@@ -50,10 +51,11 @@ Details: [docs/getting-started/github.md](docs/getting-started/github.md).
 
 ```yaml
 include:
-  - component: $CI_SERVER_FQDN/tpham1467/reviewloop/reviewloop@0.1.0
+  - component: $CI_SERVER_FQDN/tpham1467/reviewloop/reviewloop@0
 ```
 
-4. Open a merge request. For `/reviewloop` commands, add a Comments webhook to the pipeline trigger API.
+4. Open a merge request. For `/reviewloop` commands, add a Comments webhook to the pipeline trigger API. Every comment
+   then starts a trigger pipeline: exclude your other jobs from `trigger` pipelines first.
 
 Details, including `workflow:rules` and the webhook: [docs/getting-started/gitlab.md](docs/getting-started/gitlab.md).
 
@@ -93,7 +95,7 @@ More: [docs/security.md](docs/security.md), [ADR 0002](docs/adr/0002-agent-tool-
 
 ## Install outside CI
 
-The image `ghcr.io/tpham1467/reviewloop:<version>` contains reviewloop, git, gitleaks, opengrep, Claude Code and Codex.
+The image `ghcr.io/tpham1467/reviewloop:0` (or an exact `0.x.y`) contains reviewloop, git, gitleaks, opengrep, Claude Code and Codex.
 For your own runner image:
 
 ```bash

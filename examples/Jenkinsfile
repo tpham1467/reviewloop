@@ -1,5 +1,5 @@
 // Reviews Bitbucket Data Center pull requests with reviewloop.
-// Requires the Jenkins "Generic Webhook Trigger" and "Docker Pipeline" plugins.
+// Requires the Jenkins "Generic Webhook Trigger" (1.68 or later, for tokenCredentialId) and "Docker Pipeline" plugins.
 //
 // Bitbucket webhook (events: PR opened, PR comment added) ->
 //   https://jenkins.example.com/generic-webhook-trigger/invoke?token=<value of reviewloop-webhook-token>
