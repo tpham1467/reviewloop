@@ -1,3 +1,5 @@
+from pathlib import PurePosixPath
+
 from pydantic import ValidationError
 
 from reviewloop.agents.registry import get_adapter
@@ -23,6 +25,9 @@ class LoadConfig:
 
     def run(self, ctx: RunContext) -> None:
         path = ctx.env.get(CONFIG_PATH_ENV) or CONFIG_FILE
+        parts = PurePosixPath(path.replace("\\", "/"))
+        if parts.is_absolute() or ".." in parts.parts:
+            raise ConfigError(f"{CONFIG_PATH_ENV} must be a path inside the repository, without '..'")
         ctx.config = self._override(ctx, load_config(ctx.vcs.read_file(path, ctx.pr.target_branch)))
         if ctx.agent is None:
             ctx.agent = get_adapter(ctx.config.agent)

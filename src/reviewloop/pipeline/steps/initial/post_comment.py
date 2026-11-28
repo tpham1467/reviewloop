@@ -36,6 +36,7 @@ class PostComment:
     group: str | None = None
 
     def run(self, ctx: RunContext) -> None:
+        ctx.posting_started = True
         read = sandbox_reader(ctx.sandbox)
         placed: Placed = [(f, None if is_forced(f) else resolve_anchor(f, ctx.diffs, read)) for f in ctx.findings]
         lost = [i for i, (f, a) in enumerate(placed) if a is None and not is_forced(f)]

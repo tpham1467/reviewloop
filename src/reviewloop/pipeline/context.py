@@ -64,6 +64,8 @@ class RunContext:
     split_review: bool = False
     overview: str = ""
     posted: list[Finding] = field(default_factory=list[Finding])
+    # Set when a posting step (post-comment, post-follow-up-comments) starts: the CLI then writes the artifacts.
+    posting_started: bool = False
     follow_up: FollowUp | None = None
     log: logging.Logger = field(default_factory=lambda: logging.getLogger("reviewloop.pipeline"))
 

@@ -222,10 +222,10 @@ def prepare_sandbox(source: Path, dest: Path, rev: str) -> Path:
     except AgentStepError:
         raise ReviewloopError(f"sandbox: commit {rev} is not in the CI checkout; {HEAD_FETCH_HINT}") from None
     dest.parent.mkdir(parents=True, exist_ok=True)
-    # upload-pack runs in `source`, so the clone and the fetch below need it trusted; nothing trusts `dest`.
+    # Only upload-pack reads `source` as a repository, so the trust rides on it; nothing trusts `dest`.
     upload_pack = f"--upload-pack={trusted_upload_pack(source)}"
     clone = ("clone", "--no-local", "--no-hardlinks", "--no-checkout", "--quiet", upload_pack, str(source), str(dest))
-    _git(dest.parent, *clone, trust=source)
+    _git(dest.parent, *clone)
     _strip_config(dest)
     _git(dest, "config", "--local", "core.symlinks", "false")
     # Remove hooks before the checkout so no template hook can run.
@@ -235,7 +235,7 @@ def prepare_sandbox(source: Path, dest: Path, rev: str) -> Path:
         _git(dest, "cat-file", "-e", f"{rev}^{{commit}}")
     except AgentStepError:
         # The clone copies refs only; a head that no ref reaches is fetched by id.
-        _git(dest, "fetch", "--quiet", "--no-tags", upload_pack, str(source), rev, trust=source)
+        _git(dest, "fetch", "--quiet", "--no-tags", upload_pack, str(source), rev)
     _git(dest, "-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", rev)
     _clean_tree(dest)
     (dest / ".reviewloop" / "out").mkdir(parents=True)

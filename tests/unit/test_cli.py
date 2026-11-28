@@ -29,6 +29,10 @@ READER = User(id="5", username="reader")
 FAKE_TOKEN = "ghp_" + "F" * 36
 
 
+# The real posting steps set `ctx.posting_started` first thing; the fake steps with these ids do the same.
+POSTING = {"post-comment", "post-follow-up-comments"}
+
+
 class Step:
     """A flow step that runs `action` on the context."""
 
@@ -40,6 +44,7 @@ class Step:
 
     def run(self, ctx: RunContext) -> None:
         self.ran = True
+        ctx.posting_started |= self.id in POSTING
         if self.action is not None:
             self.action(ctx)
 
@@ -381,6 +386,37 @@ def test_recheck_runs_follow_up_flow(ci: Any, monkeypatch: pytest.MonkeyPatch, t
         assert ci.invoke(*args, "--output-dir", str(tmp_path / "out")).exit_code == 0
     assert [e.command for e in seen] == [Command.RECHECK, Command.RECHECK]
     assert (tmp_path / "out" / "reviewloop.json").is_file()
+
+
+def test_recheck_without_state_marker_writes_artifacts(
+    ci: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A recheck with no state marker switches to the full review (SwitchFlow); its post-comment still counts."""
+    from reviewloop.pipeline.steps.follow_up.resolve_target_turn import ResolveTargetTurn
+    from reviewloop.pipeline.steps.initial.post_comment import PostComment
+
+    with_event(ci.vcs, Event(kind=EventKind.COMMAND, command=Command.RECHECK, actor=READER, pr_number=7))
+    assert ci.vcs.summary_body() is None
+    posted: list[bool] = []
+
+    def post(ctx: RunContext) -> None:
+        # A forced scanner finding is posted as a general thread with no anchoring (and so no agent call).
+        ctx.findings = [HIGH.model_copy(update={"forced": True})]
+        ctx.coverage = [FileCoverage(path="app.py", status=CoverageStatus.REVIEWED)]
+        (ctx.sandbox / ".reviewloop" / "out").mkdir(parents=True)
+        PostComment().run(ctx)
+        posted.append(ctx.posting_started)
+
+    fallback = [Step("full-review", post)]
+    monkeypatch.setattr(flows, "follow_up_flow", lambda: [ResolveTargetTurn(fallback), Step("never", pytest.fail)])
+    out = tmp_path / "out"
+
+    result = ci.invoke("run", "--output-dir", str(out))
+
+    assert result.exit_code == 0, result.stderr
+    assert posted == [True] and len(ci.vcs.general) == 1
+    assert [f["severity"] for f in json.loads((out / "reviewloop.json").read_text())["findings"]] == ["high"]
+    assert (out / "reviewloop.sarif").is_file()
 
 
 def test_follow_up_flow_shares_head_sandbox_step() -> None:

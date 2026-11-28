@@ -75,6 +75,7 @@ def test_sandbox_from_foreign_owned_checkout(foreign_checkout: tuple[Path, str],
 
     sandbox = prepare_sandbox(repo, tmp_path / "work" / "sandbox", head)
 
+    # The head is reachable from no ref, so this also covers the fetch by id from the foreign-owned checkout.
     assert (sandbox / "app.py").read_text() == "head\n"
     assert not (tmp_path / "pwned").exists() and not Path("pwned").exists()
 
@@ -108,11 +109,11 @@ def test_clone_and_fetch_pass_upload_pack(tmp_path: Path, monkeypatch: pytest.Mo
     head = _git(repo, "rev-parse", "HEAD").strip()
     _git(repo, "checkout", "-q", "--detach", "HEAD~1")
     _git(repo, "branch", "-D", "main")
-    calls: list[list[str]] = []
+    calls: list[tuple[list[str], dict[str, str]]] = []
     real = subprocess.run
 
     def spy(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
-        calls.append(cmd)
+        calls.append((cmd, kw["env"]))  # type: ignore[arg-type]
         return real(cmd, **kw)  # type: ignore[call-overload]
 
     monkeypatch.setattr(isolation.subprocess, "run", spy)
@@ -120,6 +121,10 @@ def test_clone_and_fetch_pass_upload_pack(tmp_path: Path, monkeypatch: pytest.Mo
     prepare_sandbox(repo, sandbox, head)
 
     expected = f"--upload-pack={trusted_upload_pack(repo)}"
-    by_verb = {cmd[1]: cmd for cmd in calls if cmd[1] in ("clone", "fetch")}
-    assert expected in by_verb["clone"] and expected in by_verb["fetch"]
+    by_verb = {cmd[1]: (cmd, env) for cmd, env in calls if cmd[1] in ("clone", "fetch")}
+    for verb in ("clone", "fetch"):
+        cmd, env = by_verb[verb]
+        assert expected in cmd
+        # The trust rides only on upload-pack, the one process that opens the checkout as a repository.
+        assert "GIT_CONFIG_VALUE_0" not in env
     assert _git(sandbox, "rev-parse", "HEAD").strip() == head

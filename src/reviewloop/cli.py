@@ -26,15 +26,13 @@ from reviewloop.output.sarif import write_sarif
 from reviewloop.output.summary import exit_code
 from reviewloop.pipeline import flows
 from reviewloop.pipeline.context import RunContext
-from reviewloop.pipeline.engine import Step, run_flow
+from reviewloop.pipeline.engine import run_flow
 from reviewloop.pipeline.steps.initial.clean import KEEP_ENV
 from reviewloop.pipeline.steps.initial.load_config import CONFIG_FILE
 from reviewloop.platform import Platform, detect_platform, for_pull_request, platform_name
 
 INFRA_ERROR = 2
 HANDLER_NAME = "reviewloop-cli"
-# Steps after which the run's findings are final enough to publish as artifacts.
-POSTING_STEPS = frozenset({"post-comment", "post-follow-up-comments"})
 # The distribution name (ruling R70); `reviewloop` on PyPI is another project, so it is never looked up.
 DISTRIBUTION = "reviewloop-ai"
 HELP_TEXT = """\
@@ -96,20 +94,6 @@ def _terminate(signum: int, frame: FrameType | None) -> None:
     raise KeyboardInterrupt
 
 
-class _Tracked:
-    """Records that a step started, so the CLI knows whether the run got as far as posting."""
-
-    def __init__(self, step: Step, started: set[str]) -> None:
-        self.step = step
-        self.id = step.id
-        self.group = step.group
-        self.started = started
-
-    def run(self, ctx: RunContext) -> None:
-        self.started.add(self.id)
-        self.step.run(ctx)
-
-
 def package_version() -> str:
     try:
         return version(DISTRIBUTION)
@@ -148,18 +132,17 @@ def _dispatch(env: Mapping[str, str], workdir: Path, output_dir: Path, manual: t
         return 0
     steps = flows.follow_up_flow() if event.command is Command.RECHECK else flows.initial_flow()
     ctx = RunContext(vcs=vcs, pr=pr, event=event, env=env, source_dir=Path.cwd(), workdir=workdir)
-    started: set[str] = set()
     try:
-        run_flow([_Tracked(step, started) for step in steps], ctx)
+        run_flow(steps, ctx)
     except BaseException:
-        if started & POSTING_STEPS:
+        if ctx.posting_started:
             try:
                 _write_artifacts(ctx, output_dir)
             except Exception as exc:
                 # The flow's error is the one to report.
                 log.error("could not write artifacts (%s)", type(exc).__name__)
         raise
-    if started & POSTING_STEPS:
+    if ctx.posting_started:
         _write_artifacts(ctx, output_dir)
     return exit_code(ctx.findings, ctx.coverage, ctx.config.fail_on)
 

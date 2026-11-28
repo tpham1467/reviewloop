@@ -517,6 +517,17 @@ def test_load_config_path_from_env_reads_target_branch(make_ctx) -> None:
     assert ctx.config.language == "en"
 
 
+@pytest.mark.parametrize("path", ["../secrets.yml", "ci/../../x.yml", "/etc/passwd", "..\\up.yml"])
+def test_load_config_path_must_stay_in_repo(make_ctx, path: str) -> None:
+    from reviewloop.errors import ConfigError
+    from reviewloop.pipeline.steps.initial.load_config import LoadConfig
+
+    ctx = make_ctx()
+    ctx.env = {"REVIEWLOOP_CONFIG_PATH": path}
+    with pytest.raises(ConfigError, match="REVIEWLOOP_CONFIG_PATH"):
+        LoadConfig().run(ctx)
+
+
 def test_load_config_agent_from_env(make_ctx, monkeypatch) -> None:
     from reviewloop.pipeline.steps.initial import load_config
 
