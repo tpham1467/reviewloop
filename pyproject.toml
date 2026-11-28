@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "reviewloop"
+name = "reviewloop-ai"
 version = "0.0.0"
 description = "AI code review in your own CI with your own agent CLI (Claude Code, Codex or Cursor) for GitHub, GitLab and Bitbucket."
 readme = "README.md"
