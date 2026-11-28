@@ -8,8 +8,9 @@ tags `vX.Y.Z` and `.github/workflows/release.yml` then publishes:
 - the moving `v<major>` git tag that `uses: tpham1467/reviewloop@v0` resolves to,
 - the GitLab CI/CD Catalog release, once the mirror below exists.
 
-The version lives in `pyproject.toml`; release-please also bumps the annotated version string in `action.yml` and
-`templates/reviewloop.yml`. The manifest starts at `0.0.0`, so the first release is `0.1.0`
+The version lives in `pyproject.toml`; release-please also bumps `__version__` in `src/reviewloop/__init__.py`, the
+project's own entry in `uv.lock` (so `uv sync --locked` in the image build passes on the release commit) and the
+annotated image version in `action.yml`, `templates/reviewloop.yml`, the Bitbucket examples and the `init` snippets. The manifest starts at `0.0.0`, so the first release is `0.1.0`
 (`bump-minor-pre-major`). Releases created with `GITHUB_TOKEN` do not trigger other workflows, and neither does the
 release PR: close and reopen it, or push an empty commit to its branch, to get CI to run on it.
 
@@ -32,7 +33,9 @@ release PR: close and reopen it, or push an empty commit to its branch, to get C
 6. **GitLab mirror and Catalog.** Create a gitlab.com project that mirrors this repository (push mirror or pull
    mirror), then Settings, General, Visibility: enable "CI/CD Catalog resource". Add a description to the project;
    the Catalog requires one. A tag `vX.Y.Z` arriving on the mirror runs the `release` job in `.gitlab-ci.yml`, whose
-   `release:` keyword creates the release the Catalog lists. Nothing in the GitHub workflow pushes to GitLab.
+   `release:` keyword creates the release the Catalog lists, under a new tag `X.Y.Z` at the same commit (Catalog
+   versions are semantic versions without the `v`). Users reference it as `reviewloop@X.Y.Z` or `reviewloop@0`. If the
+   mirror is set to remove refs missing upstream, exclude these GitLab-only tags. Nothing in the GitHub workflow pushes to GitLab.
 
 ## Verify a release
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import subprocess
 import tempfile
@@ -21,6 +22,10 @@ from reviewloop.agents.isolation import host_git_env
 log = logging.getLogger("reviewloop.security")
 
 TIMEOUT_SECONDS = 90
+# opengrep rules pinned to a commit and shipped in the image (ruling R87); never `--config auto`, which would download
+# an unpinned registry pack on every run. Outside the image the env names a local rules directory.
+RULES_ENV = "REVIEWLOOP_OPENGREP_RULES"
+DEFAULT_RULES = Path("/opt/opengrep-rules")
 
 
 @dataclass(frozen=True)
@@ -118,6 +123,12 @@ def scan_history(workdir: Path, base_sha: str, head_sha: str) -> list[ScanFindin
         return _gitleaks(workdir, base_sha, head_sha, tmp)
 
 
+def _opengrep_rules() -> Path | None:
+    configured = os.environ.get(RULES_ENV)
+    rules = Path(configured) if configured else DEFAULT_RULES
+    return rules if rules.is_dir() else None
+
+
 def run_scanners(
     names: list[str], repo: Path, tree: Path, base_sha: str, head_sha: str, changed_paths: list[str]
 ) -> list[ScanFinding]:
@@ -138,7 +149,13 @@ def run_scanners(
                 if not changed_paths:
                     log.info("opengrep skipped: no changed files")
                     continue
+                rules = _opengrep_rules()
+                if rules is None:
+                    log.info("opengrep skipped: no rules at %s (set %s)", os.environ.get(RULES_ENV) or DEFAULT_RULES,
+                             RULES_ENV)  # fmt: skip
+                    continue
                 report = Path(tmp) / "opengrep.sarif"
-                cmd = ["opengrep", "scan", "--sarif", "--output", str(report), "--config", "auto", "--quiet"]
+                cmd = ["opengrep", "scan", "--sarif", "--output", str(report), "--config", str(rules),
+                       "--disable-version-check", "--quiet"]  # fmt: skip
                 findings += _run([*cmd, "--", *changed_paths], tree, report, _parse_sarif) or []
     return findings

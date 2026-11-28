@@ -57,6 +57,15 @@ def _installed(monkeypatch: pytest.MonkeyPatch, *names: str) -> None:
     monkeypatch.setattr(scanners.shutil, "which", lambda n: f"/bin/{n}" if n in names else None)
 
 
+@pytest.fixture(autouse=True)
+def _rules(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Pinned opengrep rules exist unless a test removes them."""
+    rules = tmp_path / "opengrep-rules"
+    rules.mkdir()
+    monkeypatch.setenv(scanners.RULES_ENV, str(rules))
+    return rules
+
+
 def test_missing_scanner_skipped(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path):
     _installed(monkeypatch)
     calls: list[list[str]] = []
@@ -208,3 +217,43 @@ def test_opengrep_scans_tree_gitleaks_scans_repo(monkeypatch: pytest.MonkeyPatch
     assert cwds == {"gitleaks": repo, "opengrep": tree}
     # gitleaks runs git in the checkout, which is trusted; opengrep reads the head copy and gets no git trust.
     assert trust == {"gitleaks": str(repo.resolve()), "opengrep": None}
+
+
+def test_opengrep_uses_pinned_rules_offline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _rules: Path):
+    _installed(monkeypatch, "opengrep")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(scanners.subprocess, "run", _fake_run(calls, sarif=SARIF))
+    run_scanners(["opengrep"], tmp_path, tmp_path, "a", "b", ["x.py"])
+    cmd = calls[0]
+    assert cmd[cmd.index("--config") + 1] == str(_rules)
+    assert "auto" not in cmd and "--disable-version-check" in cmd
+    assert cmd.index("--disable-version-check") < cmd.index("--")
+
+
+def test_opengrep_rules_default_to_the_image_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    monkeypatch.delenv(scanners.RULES_ENV)
+    monkeypatch.setattr(scanners, "DEFAULT_RULES", tmp_path)
+    _installed(monkeypatch, "opengrep")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(scanners.subprocess, "run", _fake_run(calls, sarif=SARIF))
+    run_scanners(["opengrep"], tmp_path, tmp_path, "a", "b", ["x.py"])
+    assert calls[0][calls[0].index("--config") + 1] == str(tmp_path)
+
+
+def test_opengrep_without_rules_is_skipped_never_auto(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path
+):
+    monkeypatch.delenv(scanners.RULES_ENV)
+    monkeypatch.setattr(scanners, "DEFAULT_RULES", tmp_path / "missing")
+    _installed(monkeypatch, "opengrep", "gitleaks")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(scanners.subprocess, "run", _fake_run(calls, gitleaks=[]))
+    with caplog.at_level("INFO", logger="reviewloop.security"):
+        assert run_scanners(["opengrep", "gitleaks"], tmp_path, tmp_path, "a", "b", ["x.py"]) == []
+    assert [c[0] for c in calls] == ["gitleaks"]
+    assert sum("opengrep skipped: no rules" in r.getMessage() for r in caplog.records) == 1
+    # A set but wrong path is skipped the same way.
+    monkeypatch.setenv(scanners.RULES_ENV, str(tmp_path / "nope"))
+    calls.clear()
+    run_scanners(["opengrep"], tmp_path, tmp_path, "a", "b", ["x.py"])
+    assert calls == []

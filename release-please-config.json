@@ -7,8 +7,35 @@
       "bump-minor-pre-major": true,
       "include-component-in-tag": false,
       "extra-files": [
-        { "type": "generic", "path": "action.yml" },
-        { "type": "generic", "path": "templates/reviewloop.yml" }
+        {
+          "type": "generic",
+          "path": "action.yml"
+        },
+        {
+          "type": "generic",
+          "path": "templates/reviewloop.yml"
+        },
+        {
+          "type": "generic",
+          "path": "src/reviewloop/__init__.py"
+        },
+        {
+          "type": "generic",
+          "path": "examples/bitbucket-pipelines.yml"
+        },
+        {
+          "type": "generic",
+          "path": "examples/Jenkinsfile"
+        },
+        {
+          "type": "generic",
+          "path": "src/reviewloop/cli_snippets.py"
+        },
+        {
+          "type": "toml",
+          "path": "uv.lock",
+          "jsonpath": "$.package[?(@.name.value==\"reviewloop-ai\")].version"
+        }
       ]
     }
   }

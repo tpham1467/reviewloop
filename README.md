@@ -103,7 +103,8 @@ pipx install reviewloop-ai
 reviewloop version
 ```
 
-The agent CLI and, optionally, gitleaks and opengrep must be on `PATH`.
+The agent CLI and, optionally, gitleaks and opengrep must be on `PATH`. opengrep also needs a local rules directory in
+`REVIEWLOOP_OPENGREP_RULES` (see [Configuration](docs/configuration.md#scanners)); without one it is skipped.
 
 ## Links
 

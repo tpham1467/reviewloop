@@ -28,6 +28,23 @@ RUN mkdir /out \
     && tar -xzf /tmp/gitleaks.tar.gz -C /out gitleaks \
     && install -m 0755 /tmp/opengrep /out/opengrep
 
+# opengrep rules pinned to a commit of opengrep/opengrep-rules and checked by sha256, so a scan makes no network call
+# (scanners pass `--config /opt/opengrep-rules`, never `auto`). Only the languages of the built-in stacks plus the
+# generic rules; generic/secrets is left out because gitleaks covers secrets. Test fixtures (non-YAML files and
+# *.test.yaml) are dropped: opengrep would try to load every YAML file in the directory as rules.
+FROM ${PYTHON_IMAGE} AS rules
+ARG OPENGREP_RULES_COMMIT=653482b25649be02d8cc373b88abb071949c352b
+ADD --checksum=sha256:2de100286d4379cf38f5c12e0e4b360b35b8799218ce5cf58bd8e24750f04f40 \
+    https://codeload.github.com/opengrep/opengrep-rules/tar.gz/${OPENGREP_RULES_COMMIT} /tmp/rules.tar.gz
+RUN mkdir /tmp/src /out \
+    && tar -xzf /tmp/rules.tar.gz -C /tmp/src --strip-components=1 \
+    && cd /tmp/src \
+    && find csharp go java javascript php python typescript generic -path generic/secrets -prune -o -type f \
+         \( -name '*.yaml' -o -name '*.yml' \) ! -name '*.test.yaml' ! -name '*.test.yml' -print \
+         | xargs cp --parents -t /out \
+    && cp LICENSE /out/LICENSE \
+    && echo "${OPENGREP_RULES_COMMIT}" > /out/COMMIT
+
 # Agent CLIs. The Claude Code postinstall picks the native binary for this platform.
 FROM ${NODE_IMAGE} AS agents
 RUN npm install --global --prefix /opt/agents --no-fund --no-audit \
@@ -66,6 +83,7 @@ RUN apt-get update \
     && chmod 1777 /home/reviewloop
 
 COPY --from=tools /out/ /usr/local/bin/
+COPY --from=rules /out/ /opt/opengrep-rules/
 COPY --from=agents /usr/local/bin/node /usr/local/bin/node
 COPY --from=agents /opt/agents /opt/agents
 COPY --from=app /opt/reviewloop /opt/reviewloop

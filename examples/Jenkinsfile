@@ -48,7 +48,8 @@ pipeline {
     stage('Review') {
       agent {
         docker {
-          image 'ghcr.io/tpham1467/reviewloop:0'
+          // Exact version, bumped on each release; review a new version before you update it.
+          image 'ghcr.io/tpham1467/reviewloop:0.1.0' // x-release-please-version
           args '--entrypoint='
           reuseNode true
         }
