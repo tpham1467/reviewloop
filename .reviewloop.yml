@@ -1,0 +1,11 @@
+# reviewloop reviews its own pull requests with these settings.
+version: 1
+agent: claude-code
+language: en
+paths:
+  exclude: ["tests/fixtures/**"]
+security:
+  enabled: true
+  scanners: [opengrep, gitleaks]
+suggestions: true
+fail_on: none

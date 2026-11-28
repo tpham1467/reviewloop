@@ -1,0 +1,26 @@
+# Add to .gitlab-ci.yml. Set these masked CI/CD variables (type Variable, not File, and not protected):
+#   REVIEWLOOP_GITLAB_TOKEN  project access token, role Developer, scope api
+#   ANTHROPIC_API_KEY        your agent credential
+# For /reviewloop commands, add a Comments webhook that calls the pipeline trigger API (docs/getting-started/gitlab.md).
+include:
+  - component: $CI_SERVER_FQDN/tpham1467/reviewloop/reviewloop@0
+    inputs:
+      agent: claude-code
+
+# Allow merge request and trigger pipelines, without duplicate branch pipelines for open merge requests.
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "trigger"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+
+# Every merge request comment starts a trigger pipeline through the webhook. Keep your other jobs out of it, or each
+# comment runs them, deploys included. Put this rule first in every job other than reviewloop:
+#
+# build:
+#   rules:
+#     - if: $CI_PIPELINE_SOURCE == "trigger"
+#       when: never
+#     - when: on_success

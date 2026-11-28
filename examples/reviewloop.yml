@@ -1,0 +1,22 @@
+# .reviewloop.yml: read from the target branch of each pull request. Every key is optional.
+version: 1
+agent: claude-code        # claude-code | codex | cursor (codex and cursor need REVIEWLOOP_EXPERIMENTAL_AGENTS=1)
+model: sonnet             # passed to the agent CLI as is; omit for the CLI default
+language: en              # language of review comments
+paths:
+  exclude: ["**/*.snap", "docs/generated/**"]
+rules:
+  - path: "app/Http/**"   # when a changed file matches this glob...
+    file: .reviewloop/rules/api.md   # ...this rule file (on the target branch) is added to the review
+tracker:
+  type: jira              # github | gitlab | jira
+  url: https://jira.example.com
+  key_pattern: "[A-Z]+-\\d+"
+  require_context: false  # true: skip the review when no ticket is found
+security:
+  enabled: true
+  scanners: [opengrep, gitleaks]
+suggestions: true
+fail_on: none             # none | critical | high
+large_diff_lines: 3000    # above this many changed lines the diff is split into groups
+review_drafts: false      # true: also review draft pull requests when they open

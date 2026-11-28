@@ -7,11 +7,11 @@
     }
   },
   "comment": {
-    "body": "/reviewloop review",
+    "body": "\n/reviewloop review\nthanks",
     "user": {
       "id": 7,
       "login": "alice"
     },
-    "author_association": "CONTRIBUTOR"
+    "author_association": "COLLABORATOR"
   }
 }

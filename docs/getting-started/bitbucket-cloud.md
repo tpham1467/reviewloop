@@ -6,7 +6,7 @@
 2. Add repository variables, both marked as secured:
    - `REVIEWLOOP_BITBUCKET_TOKEN`: the access token.
    - Your agent credential (see the agent docs for the variable name).
-3. Copy [`examples/bitbucket-pipelines.yml`](../../examples/bitbucket-pipelines.yml) to
+3. Copy [`examples/bitbucket-pipelines.yml`](https://github.com/tpham1467/reviewloop/blob/main/examples/bitbucket-pipelines.yml) to
    `bitbucket-pipelines.yml` in the repository root.
 4. Enable Pipelines for the repository.
 

@@ -1,0 +1,69 @@
+spec:
+  inputs:
+    agent:
+      description: Agent CLI to run (claude-code; codex and cursor are experimental). Overrides `agent` in .reviewloop.yml.
+      default: claude-code
+      options: [claude-code, codex, cursor]
+    model:
+      description: Model name passed to the agent CLI as is. Empty uses the CLI default or `model` in .reviewloop.yml.
+      default: ""
+    image_tag:
+      description: Tag of ghcr.io/tpham1467/reviewloop to run. Defaults to the version of this component release.
+      default: "0.1.0" # x-release-please-version
+    stage:
+      description: Pipeline stage of the reviewloop job.
+      default: test
+---
+# Reviews merge requests on `merge_request_event` pipelines (skipped within seconds once the MR has a reviewloop
+# summary) and runs `/reviewloop` commands on `trigger` pipelines started by a Comments webhook.
+# No `interruptible`: command pipelines share one ref, and auto-cancel would stop reviews of other merge requests.
+reviewloop:
+  stage: $[[ inputs.stage ]]
+  image:
+    name: ghcr.io/tpham1467/reviewloop:$[[ inputs.image_tag ]]
+    entrypoint: [""]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "trigger"
+  variables:
+    GIT_DEPTH: "0"
+    REVIEWLOOP_AGENT: $[[ inputs.agent ]]
+    REVIEWLOOP_MODEL: $[[ inputs.model ]]
+  script:
+    # Check out the trusted target branch and fetch the merge request head as git objects only. The merge request
+    # comes from the pipeline variables, or from the Comments webhook payload on a trigger pipeline.
+    - |
+      set -eu
+      mr=$(python3 -I -c '
+      import json, os, re
+      iid = os.environ.get("CI_MERGE_REQUEST_IID", "")
+      target = os.environ.get("CI_MERGE_REQUEST_TARGET_BRANCH_NAME", "")
+      raw = os.environ.get("TRIGGER_PAYLOAD", "")
+      if not iid and raw:
+          try:
+              text = open(raw, encoding="utf-8").read() if os.path.isfile(raw) else raw
+              mr = json.loads(text).get("merge_request") or {}
+              iid, target = str(mr.get("iid", "")), str(mr.get("target_branch", ""))
+          except (OSError, ValueError, AttributeError):
+              pass
+      ok = re.fullmatch(r"[0-9]+", iid) and re.fullmatch(r"[A-Za-z0-9._/-]+", target) and ".." not in target
+      print(f"{iid} {target}" if ok else "")
+      ')
+      if [ -n "$mr" ]; then
+        iid=${mr%% *}
+        target=${mr#* }
+        # The runner's checkout is owned by root and the job runs as uid 1001: trust exactly this checkout.
+        # A failed fetch or checkout is an infrastructure error: exit 2, like reviewloop itself.
+        git -c safe.directory="$CI_PROJECT_DIR" fetch --no-tags --quiet origin \
+          "+refs/heads/${target}:refs/remotes/origin/${target}" \
+          "+refs/merge-requests/${iid}/head:refs/remotes/merge-requests/${iid}/head" || exit 2
+        git -c safe.directory="$CI_PROJECT_DIR" -c advice.detachedHead=false \
+          checkout --quiet --detach "refs/remotes/origin/${target}" || exit 2
+      fi
+    - reviewloop run
+  artifacts:
+    when: always
+    paths:
+      - reviewloop.json
+      - reviewloop.sarif
+    expire_in: 30 days

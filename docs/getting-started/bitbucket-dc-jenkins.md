@@ -16,7 +16,8 @@ is never logged.
 
 ## 2. Jenkins plugins and credentials
 
-Install the **Generic Webhook Trigger** and **Docker Pipeline** plugins. Create these
+Install the **Generic Webhook Trigger** (1.68 or later, for `tokenCredentialId`) and **Docker Pipeline**
+plugins. Create these
 credentials:
 
 - `reviewloop-webhook-token` (Secret text): the trigger token. Put the same
@@ -31,7 +32,7 @@ API calls, bound with `withCredentials`.
 
 ## 3. Job
 
-Create a Pipeline job from `examples/Jenkinsfile`. Edit `BB_URL` and the clone URL for your server. The pipeline maps these variables
+Create a Pipeline job from [`examples/Jenkinsfile`](https://github.com/tpham1467/reviewloop/blob/main/examples/Jenkinsfile). Edit `BB_URL` and the clone URL for your server. The pipeline maps these variables
 from the webhook JSON:
 
 | Variable | Meaning |

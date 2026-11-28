@@ -1,0 +1,85 @@
+name: reviewloop AI code review
+description: AI review of pull requests in your own CI, with your own agent CLI and credentials. Inline comments.
+author: tpham1467
+branding:
+  icon: eye
+  color: blue
+
+inputs:
+  agent:
+    description: Agent CLI to run (claude-code; codex and cursor are experimental). Overrides `agent` in .reviewloop.yml.
+    required: false
+    default: claude-code
+  model:
+    description: Model name passed to the agent CLI as is. Empty uses the CLI default or `model` in .reviewloop.yml.
+    required: false
+    default: ""
+  config-path:
+    description: Path of the config file on the target branch.
+    required: false
+    default: .reviewloop.yml
+  github-token:
+    description: "Token used to read the pull request and post comments. Needs `pull-requests: write`."
+    required: false
+    default: ${{ github.token }}
+  version:
+    description: Image tag to run instead of the version pinned by this release of the action.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Run reviewloop
+      shell: bash
+      env:
+        PINNED_VERSION: "0.1.0" # x-release-please-version
+        INPUT_AGENT: ${{ inputs.agent }}
+        INPUT_MODEL: ${{ inputs.model }}
+        INPUT_CONFIG_PATH: ${{ inputs.config-path }}
+        INPUT_VERSION: ${{ inputs.version }}
+        REVIEWLOOP_GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        version="${INPUT_VERSION:-$PINNED_VERSION}"
+        if [[ ! "$version" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+          echo "::error::reviewloop: invalid version '${version}'"
+          exit 2
+        fi
+
+        # Values travel through the environment; `-e NAME` copies a variable without putting its value in argv.
+        export GITHUB_TOKEN="$REVIEWLOOP_GITHUB_TOKEN"
+        export REVIEWLOOP_AGENT="$INPUT_AGENT" REVIEWLOOP_MODEL="$INPUT_MODEL" REVIEWLOOP_CONFIG_PATH="$INPUT_CONFIG_PATH"
+        # reviewloop's work dir goes under a private subdirectory of RUNNER_TEMP. Only that directory is mounted:
+        # RUNNER_TEMP itself can hold actions/checkout's credentials file and the runner's file commands.
+        work_temp="${RUNNER_TEMP}/reviewloop"
+        mkdir -p "$work_temp"
+        args=(
+          -e GITHUB_ACTIONS -e GITHUB_EVENT_NAME -e GITHUB_EVENT_PATH -e GITHUB_REPOSITORY -e GITHUB_TOKEN
+          -e REVIEWLOOP_AGENT -e REVIEWLOOP_MODEL -e REVIEWLOOP_CONFIG_PATH -e "RUNNER_TEMP=${work_temp}"
+        )
+        # Agent, tracker and reviewloop settings set on the calling step: passed only when set, by name only.
+        while IFS= read -r name; do
+          case "$name" in
+            ANTHROPIC_* | CLAUDE_CODE_* | AWS_REGION | AWS_DEFAULT_REGION | AWS_ACCESS_KEY_ID | AWS_SECRET_ACCESS_KEY | \
+              AWS_SESSION_TOKEN | AWS_BEARER_TOKEN_BEDROCK | CLOUD_ML_REGION | VERTEX_REGION_* | \
+              GOOGLE_APPLICATION_CREDENTIALS | OPENAI_API_KEY | CODEX_AUTH_JSON | CURSOR_API_KEY | REVIEWLOOP_*)
+              case "$name" in
+                REVIEWLOOP_AGENT | REVIEWLOOP_MODEL | REVIEWLOOP_CONFIG_PATH | REVIEWLOOP_GITHUB_TOKEN) ;;
+                *) args+=(-e "$name") ;;
+              esac
+              ;;
+          esac
+        done < <(compgen -e)
+
+        # --user: the workspace belongs to the runner user, and reviewloop writes reviewloop.json/.sarif into it and its
+        # work dir into $RUNNER_TEMP/reviewloop. That uid is 1001 on GitHub-hosted runners (the image's own) but not on every
+        # self-hosted runner, so the container takes the runner's uid instead of relying on the image default.
+        docker run --rm \
+          --user "$(id -u):$(id -g)" \
+          --cap-drop=ALL --security-opt no-new-privileges \
+          -v "${GITHUB_WORKSPACE}:${GITHUB_WORKSPACE}" -w "${GITHUB_WORKSPACE}" \
+          -v "${GITHUB_EVENT_PATH}:${GITHUB_EVENT_PATH}:ro" \
+          -v "${work_temp}:${work_temp}" \
+          "${args[@]}" \
+          "ghcr.io/tpham1467/reviewloop:${version}"

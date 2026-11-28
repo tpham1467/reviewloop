@@ -27,7 +27,7 @@ _GRAPHQL_URL = "https://api.github.com/graphql"
 _ACTIONS_BOT = User(id="41898282", username="github-actions[bot]")
 _OPEN_ACTIONS = {"opened", "reopened", "ready_for_review"}
 _MAX_SUGGESTION_LINES = 30
-_WRITE_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
+# `author_association` is not used: COLLABORATOR includes read-only collaborators and MEMBER any organization member.
 _WRITE_PERMISSIONS = {"admin", "maintain", "write"}
 
 _THREADS_QUERY = """
@@ -189,11 +189,6 @@ class GitHubAdapter:
         return self._bot
 
     def can_write(self, user: User) -> bool:
-        comment: dict[str, Any] = self._load_payload().get("comment") or {}
-        commenter: dict[str, Any] = comment.get("user") or {}
-        author = commenter.get("login")
-        if self._event_name == "issue_comment" and author == user.username:
-            return comment.get("author_association") in _WRITE_ASSOCIATIONS
         try:
             permission = self._repo.get_collaborator_permission(user.username)
         except GithubException as exc:

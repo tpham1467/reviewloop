@@ -59,12 +59,16 @@ def test_event_comment_on_issue_not_pr_ignored():
     assert make("comment_issue.json")[0].event().kind == EventKind.IGNORED
 
 
-def test_can_write_uses_author_association():
+def test_can_write_ignores_author_association():
+    # author_association COLLABORATOR or MEMBER also covers read-only collaborators and any org member: only the
+    # repository permission counts, so a commenter with read permission is refused.
     alice = User(id="7", username="alice")
-    assert make("comment_review.json")[0].can_write(alice)
-    adapter, _, repo = make("comment_contributor.json")
-    assert not adapter.can_write(alice)
-    repo.get_collaborator_permission.assert_not_called()
+    adapter, _, repo = make("comment_collaborator.json")
+    repo.get_collaborator_permission.return_value = "read"
+    assert adapter.can_write(alice) is False
+    repo.get_collaborator_permission.assert_called_once_with("alice")
+    repo.get_collaborator_permission.return_value = "write"
+    assert adapter.can_write(alice) is True
 
 
 @pytest.mark.parametrize(("perm", "ok"), [("write", True), ("maintain", True), ("read", False)])
