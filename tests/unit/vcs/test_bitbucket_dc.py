@@ -126,13 +126,10 @@ def test_pull_request_maps_fields() -> None:
         "id": 7, "title": "T", "description": None,
         "fromRef": {"displayId": "feat", "latestCommit": "h1", "repository": {"id": 1}},
         "toRef": {"displayId": "main", "latestCommit": "b1", "repository": {"id": 1}},
-        "author": {"user": ALICE},
-        "links": {"self": [{"href": "https://bb.example.com/pr/7"}]},
     }  # fmt: skip
     pr = adapter.pull_request()
     assert (pr.number, pr.body, pr.source_branch, pr.target_branch) == (7, "", "feat", "main")
-    assert (pr.head_sha, pr.base_sha, pr.author.id, pr.is_fork) == ("h1", "b1", "alice", False)
-    assert pr.web_url == "https://bb.example.com/pr/7"
+    assert (pr.head_sha, pr.base_sha, pr.is_fork) == ("h1", "b1", False)
 
 
 def test_pull_request_fork_and_bad_shape() -> None:

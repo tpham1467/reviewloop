@@ -15,7 +15,6 @@ from requests import RequestException
 from reviewloop.errors import ReviewloopError
 from reviewloop.models import (
     Anchor,
-    Command,
     Event,
     EventKind,
     Finding,
@@ -27,8 +26,10 @@ from reviewloop.models import (
     User,
 )
 from reviewloop.state import parse_finding_marker, parse_state_marker
+from reviewloop.vcs.bitbucket_http import failure as _failure
+from reviewloop.vcs.bitbucket_http import http_status as _status
+from reviewloop.vcs.common import SUMMARY_MARKER, parse_command
 
-SUMMARY_MARKER = "<!-- reviewloop:summary -->"
 _NOT_FOUND = 404
 _REJECTED_ANCHOR = frozenset({400, 404, 409})
 _NO_RESOLVE = frozenset({400, 405})
@@ -42,17 +43,6 @@ _FOUR_BYTE = re.compile("[\U00010000-\U0010ffff]")
 def clean_text(text: str) -> str:
     """Bitbucket DC answers 500 to 4-byte characters (emoji and the like)."""
     return _FOUR_BYTE.sub("�", text)
-
-
-def _status(exc: BaseException | None) -> int | None:
-    response = exc.response if isinstance(exc, RequestException) else None
-    return response.status_code if response is not None else None
-
-
-def _failure(what: str, exc: RequestException) -> ReviewloopError:
-    status = _status(exc)
-    detail = f"HTTP {status}" if status is not None else "network error"
-    return ReviewloopError(f"Bitbucket {what} failed ({detail})")
 
 
 def _user(raw: Mapping[str, Any]) -> User:
@@ -165,14 +155,9 @@ class BitbucketDCAdapter:
         return Event(kind=EventKind.IGNORED)
 
     def _command_event(self, number: int) -> Event:
-        lines = [ln.strip() for ln in self._env.get("BB_COMMENT", "").splitlines() if ln.strip()]
-        parts = lines[0].split() if lines else []
+        command = parse_command(self._env.get("BB_COMMENT", ""))
         actor = self._env.get("BB_ACTOR", "").strip()
-        if len(parts) != 2 or parts[0] != "/reviewloop" or not actor:
-            return Event(kind=EventKind.IGNORED)
-        try:
-            command = Command(parts[1])
-        except ValueError:
+        if command is None or not actor:
             return Event(kind=EventKind.IGNORED)
         return Event(
             kind=EventKind.COMMAND,
@@ -186,8 +171,6 @@ class BitbucketDCAdapter:
         raw: dict[str, Any] = self._get("pull request lookup", self._pr_path(number))
         try:
             source, target = raw["fromRef"], raw["toRef"]
-            link_map: dict[str, Any] = raw.get("links") or {}
-            links: list[dict[str, Any]] = link_map.get("self") or [{}]
             return PullRequest(
                 number=int(raw["id"]),
                 title=raw["title"],
@@ -196,9 +179,7 @@ class BitbucketDCAdapter:
                 target_branch=target["displayId"],
                 head_sha=source["latestCommit"],
                 base_sha=target["latestCommit"],
-                author=_user(raw["author"]["user"]),
                 is_fork=source["repository"]["id"] != target["repository"]["id"],
-                web_url=str(links[0].get("href", "")),
                 draft=bool(raw.get("draft")),
             )
         except (KeyError, TypeError, IndexError) as exc:

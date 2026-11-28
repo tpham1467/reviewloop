@@ -130,8 +130,10 @@ def test_event_custom_pipeline_command() -> None:
     assert event.actor == User(id="{alice}", username="{alice}")
 
 
-def test_event_unknown_command_is_ignored() -> None:
-    adapter, _ = make({"PR_ID": "42", "COMMAND": "dance", "BITBUCKET_STEP_TRIGGERER_UUID": "{a}"})
+@pytest.mark.parametrize("command", ["dance", "Review", "review now"])
+def test_event_unknown_command_is_ignored(command: str) -> None:
+    # The same case-sensitive syntax as a comment command on every other platform.
+    adapter, _ = make({"PR_ID": "42", "COMMAND": command, "BITBUCKET_STEP_TRIGGERER_UUID": "{a}"})
     assert adapter.event().kind is EventKind.IGNORED
 
 
@@ -150,7 +152,6 @@ def test_pull_request_maps_fields() -> None:
     pr = adapter.pull_request()
     assert (pr.number, pr.head_sha, pr.base_sha) == (42, "abcfull", "basefull")
     assert (pr.source_branch, pr.target_branch, pr.body) == ("feat", "main", "")
-    assert pr.author == User(id="{alice}", username="alice")
     assert pr.is_fork is False
     assert adapter.pull_request() is pr
 

@@ -103,7 +103,6 @@ def test_pull_request_maps_fields() -> None:
     adapter, _, _ = make(MR_ENV)
     pr = adapter.pull_request()
     assert (pr.number, pr.head_sha, pr.base_sha, pr.is_fork) == (42, "h1", "b1", True)
-    assert pr.author.username == "alice"
 
 
 def test_pull_request_in_trigger_pipeline_uses_payload() -> None:

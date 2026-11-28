@@ -1,13 +1,13 @@
 import re
 import subprocess
 
-from reviewloop.agents.isolation import host_git_env
+from reviewloop.agents.isolation import host_git_env, is_sha
 from reviewloop.diff import FileDiff, parse_unified_diff
 from reviewloop.errors import ReviewloopError
 from reviewloop.models import CoverageStatus, FileCoverage
 from reviewloop.output.redact import redact
 from reviewloop.pipeline.context import RunContext
-from reviewloop.pipeline.git import is_sha, run_git
+from reviewloop.pipeline.git import run_git
 from reviewloop.stacks import glob_match
 
 _VERSION = re.compile(r"git version (\d+)\.(\d+)")

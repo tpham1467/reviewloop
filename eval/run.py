@@ -173,9 +173,7 @@ def run_case(case: Case, env: dict[str, str]) -> list[Posted]:
             target_branch="main",
             head_sha=head,
             base_sha=base,
-            author=User(id="1", username="author"),
             is_fork=False,
-            web_url="https://example.test/pr/1",
         )
         vcs = EvalVcs(repo, pr)
         ctx = RunContext(

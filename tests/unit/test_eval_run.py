@@ -8,7 +8,7 @@ import run as eval_run
 from score import Expected
 
 from reviewloop.diff import parse_unified_diff
-from reviewloop.models import Finding, PullRequest, User
+from reviewloop.models import Finding, PullRequest
 from reviewloop.skills.schemas import PROTECTED_CATEGORIES
 from reviewloop.stacks import detect_stacks
 
@@ -48,7 +48,7 @@ def test_eval_vcs_records_inline_findings_and_reads_files(tmp_path: Path) -> Non
     repo, base, head = case.build(tmp_path)
     pr = PullRequest(
         number=1, title="t", body="", source_branch="feature", target_branch="main", head_sha=head, base_sha=base,
-        author=User(id="1", username="a"), is_fork=False, web_url="https://example.test/1",
+        is_fork=False,
     )  # fmt: skip
     vcs = eval_run.EvalVcs(repo, pr)
     f = Finding(path="x", line=1, severity="low", category="correctness", text="t", existing_code="c")  # type: ignore[arg-type]

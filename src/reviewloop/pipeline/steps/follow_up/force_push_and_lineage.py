@@ -1,6 +1,7 @@
+from reviewloop.agents.isolation import is_sha
 from reviewloop.errors import ReviewloopError
 from reviewloop.pipeline.context import RunContext
-from reviewloop.pipeline.git import is_sha, run_git
+from reviewloop.pipeline.git import run_git
 
 # `git merge-base --is-ancestor` exits 0 for an ancestor and 1 for a commit that is not one.
 _NOT_ANCESTOR = 1

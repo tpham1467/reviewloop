@@ -56,9 +56,7 @@ class PullRequest(BaseModel):
     target_branch: str
     head_sha: str
     base_sha: str
-    author: User
     is_fork: bool
-    web_url: str
     draft: bool = False
 
 

@@ -102,7 +102,7 @@ class FakeAgent:
         # Give a sibling agent in the same sandbox time to show up in the snapshot, as a real CLI run would.
         time.sleep(0.05)
         verify_only_output_changed(before, snapshot(task.workdir), rel)
-        return AgentResult(output=read_output(task), transcript_path=task.workdir / rel, duration_s=0.0)
+        return AgentResult(output=read_output(task))
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -154,9 +154,7 @@ def make_pr(**overrides: Any) -> PullRequest:
         "target_branch": "main",
         "head_sha": "b" * 40,
         "base_sha": "a" * 40,
-        "author": User(id="1", username="alice"),
         "is_fork": False,
-        "web_url": "https://example.test/pr/7",
         **overrides,
     }
     return PullRequest(**data)

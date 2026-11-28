@@ -69,8 +69,7 @@ def test_summary_lists_failed_files() -> None:
 @pytest.mark.parametrize(
     ("status", "error", "text"),
     [
-        ("reviewing", None, "Reviewing..."),
-        ("rechecking", None, "Re-checking..."),
+        ("done", None, "Review complete"),
         ("failed", "boom", "Review failed: boom"),
     ],
 )
