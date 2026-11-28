@@ -22,8 +22,8 @@ from reviewloop.agents.isolation import host_git_env
 log = logging.getLogger("reviewloop.security")
 
 TIMEOUT_SECONDS = 90
-# opengrep rules pinned to a commit and shipped in the image (ruling R87); never `--config auto`, which would download
-# an unpinned registry pack on every run. Outside the image the env names a local rules directory.
+# opengrep runs only with rules the user provides (rulings R87, R88): the env names a rules directory, else the fixed
+# path, which the image leaves empty. Never `--config auto`, which would download an unpinned registry pack each run.
 RULES_ENV = "REVIEWLOOP_OPENGREP_RULES"
 DEFAULT_RULES = Path("/opt/opengrep-rules")
 
@@ -126,7 +126,8 @@ def scan_history(workdir: Path, base_sha: str, head_sha: str) -> list[ScanFindin
 def _opengrep_rules() -> Path | None:
     configured = os.environ.get(RULES_ENV)
     rules = Path(configured) if configured else DEFAULT_RULES
-    return rules if rules.is_dir() else None
+    # An empty directory (a bare mount point) has no rules; opengrep would fail on it.
+    return rules if rules.is_dir() and any(rules.iterdir()) else None
 
 
 def run_scanners(

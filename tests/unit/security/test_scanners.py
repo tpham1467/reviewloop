@@ -62,6 +62,7 @@ def _rules(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """Pinned opengrep rules exist unless a test removes them."""
     rules = tmp_path / "opengrep-rules"
     rules.mkdir()
+    (rules / "rule.yaml").write_text("rules: []\n")
     monkeypatch.setenv(scanners.RULES_ENV, str(rules))
     return rules
 
@@ -230,14 +231,14 @@ def test_opengrep_uses_pinned_rules_offline(monkeypatch: pytest.MonkeyPatch, tmp
     assert cmd.index("--disable-version-check") < cmd.index("--")
 
 
-def test_opengrep_rules_default_to_the_image_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+def test_opengrep_rules_default_to_the_fixed_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _rules: Path):
     monkeypatch.delenv(scanners.RULES_ENV)
-    monkeypatch.setattr(scanners, "DEFAULT_RULES", tmp_path)
+    monkeypatch.setattr(scanners, "DEFAULT_RULES", _rules)
     _installed(monkeypatch, "opengrep")
     calls: list[list[str]] = []
     monkeypatch.setattr(scanners.subprocess, "run", _fake_run(calls, sarif=SARIF))
     run_scanners(["opengrep"], tmp_path, tmp_path, "a", "b", ["x.py"])
-    assert calls[0][calls[0].index("--config") + 1] == str(tmp_path)
+    assert calls[0][calls[0].index("--config") + 1] == str(_rules)
 
 
 def test_opengrep_without_rules_is_skipped_never_auto(
@@ -252,8 +253,11 @@ def test_opengrep_without_rules_is_skipped_never_auto(
         assert run_scanners(["opengrep", "gitleaks"], tmp_path, tmp_path, "a", "b", ["x.py"]) == []
     assert [c[0] for c in calls] == ["gitleaks"]
     assert sum("opengrep skipped: no rules" in r.getMessage() for r in caplog.records) == 1
-    # A set but wrong path is skipped the same way.
-    monkeypatch.setenv(scanners.RULES_ENV, str(tmp_path / "nope"))
-    calls.clear()
-    run_scanners(["opengrep"], tmp_path, tmp_path, "a", "b", ["x.py"])
-    assert calls == []
+    # A set but wrong path, and an empty directory (the image's fixed path, a bare mount point), are skipped the same.
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    for missing in (tmp_path / "nope", empty):
+        monkeypatch.setenv(scanners.RULES_ENV, str(missing))
+        calls.clear()
+        run_scanners(["opengrep"], tmp_path, tmp_path, "a", "b", ["x.py"])
+        assert calls == []

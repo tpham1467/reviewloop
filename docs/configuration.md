@@ -78,13 +78,16 @@ a repository rule wins when it conflicts with a built-in one. reviewloop prefixe
 `security.scanners` runs gitleaks (on the PR's commits) and opengrep (on the changed files) before the security
 agents. Their output is a hint for the agents; a missing scanner is skipped with one log line.
 
-opengrep never downloads rules. It runs with `--config <rules directory> --disable-version-check`:
+Out of the box only gitleaks scans: the image ships the opengrep binary but no rules. opengrep runs only with rules
+you provide, from `REVIEWLOOP_OPENGREP_RULES` (a directory of opengrep rule files) or, when that is unset, from
+`/opt/opengrep-rules`. Either:
 
-- In the image the rules are at `/opt/opengrep-rules`: the `opengrep/opengrep-rules` repository pinned to one commit
-  (in `COMMIT` there, checked by sha256 at build time), limited to C#, Go, Java, JavaScript, PHP, Python, TypeScript
-  and the generic rules, without the secret rules (gitleaks covers those). Their license is in `LICENSE` there.
-- Outside the image set `REVIEWLOOP_OPENGREP_RULES` to a directory of opengrep rules. When it is unset and
-  `/opt/opengrep-rules` does not exist, opengrep is skipped; reviewloop never falls back to `--config auto`.
+- mount a rules directory into the job and set `REVIEWLOOP_OPENGREP_RULES` to its path, or
+- build a derived image that copies your rules to `/opt/opengrep-rules`.
+
+reviewloop runs opengrep with `--config <rules directory> --disable-version-check`, so a scan makes no network call.
+When no rules are present (the variable unset and `/opt/opengrep-rules` missing or empty), opengrep is skipped with one
+log line. reviewloop never runs `--config auto`, which downloads rules on every run.
 
 ## Tracker
 
