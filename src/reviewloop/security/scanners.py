@@ -125,7 +125,8 @@ def scan_history(workdir: Path, base_sha: str, head_sha: str) -> list[ScanFindin
 
 def _opengrep_rules() -> Path | None:
     configured = os.environ.get(RULES_ENV)
-    rules = Path(configured) if configured else DEFAULT_RULES
+    # Resolved here: opengrep runs with the sandbox copy as cwd, where a relative path would name PR-controlled files.
+    rules = Path(configured).resolve() if configured else DEFAULT_RULES
     # An empty directory (a bare mount point) has no rules; opengrep would fail on it.
     return rules if rules.is_dir() and any(rules.iterdir()) else None
 

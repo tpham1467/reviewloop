@@ -19,7 +19,7 @@ from reviewloop.models import (
     User,
 )
 from reviewloop.state import parse_finding_marker, parse_state_marker
-from reviewloop.vcs.common import SUMMARY_MARKER, located, parse_command, suggestion_fence
+from reviewloop.vcs.common import SUMMARY_MARKER, located, parse_command, suggestion_fence, with_suggestion
 
 _GRAPHQL_URL = "https://api.github.com/graphql"
 _ACTIONS_BOT = User(id="41898282", username="github-actions[bot]")
@@ -294,7 +294,7 @@ class GitHubAdapter:
                 span = anchor.line - (anchor.start_line or anchor.line) + 1
                 block = self.suggestion_block(anchor, finding.suggestion, span)
                 if block is not None:
-                    body = f"{body}\n\n{block}"
+                    body = with_suggestion(body, block)
             kwargs.update(line=anchor.line, side=side)
             if anchor.start_line is not None:
                 kwargs.update(start_line=anchor.start_line, start_side=side)

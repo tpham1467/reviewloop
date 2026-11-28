@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from reviewloop.models import FindingMarker, RunState
 
+FINDING_MARKER_PREFIX = "<!-- reviewloop:finding "
 _FINDING_RE = re.compile(r"<!-- reviewloop:finding (.*?) -->")
 _M = TypeVar("_M", bound=BaseModel)
 _STATE_RE = re.compile(r"<!-- reviewloop:state (.*?) -->")

@@ -261,3 +261,19 @@ def test_opengrep_without_rules_is_skipped_never_auto(
         calls.clear()
         run_scanners(["opengrep"], tmp_path, tmp_path, "a", "b", ["x.py"])
         assert calls == []
+
+
+def test_relative_rules_path_resolves_against_the_process_cwd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _rules: Path
+):
+    """opengrep runs in the sandbox copy, so a relative path passed through as is would point into the PR's tree."""
+    monkeypatch.chdir(_rules.parent)
+    monkeypatch.setenv(scanners.RULES_ENV, _rules.name)
+    _installed(monkeypatch, "opengrep")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(scanners.subprocess, "run", _fake_run(calls, sarif=SARIF))
+    sandbox = tmp_path / "sandbox"
+    (sandbox / _rules.name).mkdir(parents=True)
+    (sandbox / _rules.name / "pr-controlled.yaml").write_text("rules: []\n")
+    run_scanners(["opengrep"], tmp_path, sandbox, "a", "b", ["x.py"])
+    assert calls[0][calls[0].index("--config") + 1] == str(_rules.resolve())

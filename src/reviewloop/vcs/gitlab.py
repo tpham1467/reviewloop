@@ -22,7 +22,7 @@ from reviewloop.models import (
     User,
 )
 from reviewloop.state import parse_finding_marker
-from reviewloop.vcs.common import SUMMARY_MARKER, located, parse_command, suggestion_fence
+from reviewloop.vcs.common import SUMMARY_MARKER, located, parse_command, suggestion_fence, with_suggestion
 
 _DEVELOPER = 30
 _MAX_SUGGESTION_LINES = 30
@@ -203,7 +203,7 @@ class GitLabAdapter:
         if not finding.suggestion or finding.security or lines > _MAX_SUGGESTION_LINES:
             return finding.text
         block = self.suggestion_block(anchor, finding.suggestion, replaced_lines=lines)
-        return f"{finding.text}\n\n{block}" if block else finding.text
+        return with_suggestion(finding.text, block) if block else finding.text
 
     def post_inline(self, finding: Finding, anchor: Anchor) -> ThreadRef:
         mr = self._mr(self._pr_number())

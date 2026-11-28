@@ -5,6 +5,7 @@ import re
 
 from reviewloop.models import COMMAND_PREFIX, Anchor, Command
 from reviewloop.output.redact import safe_text
+from reviewloop.state import FINDING_MARKER_PREFIX
 
 SUMMARY_MARKER = "<!-- reviewloop:summary -->"
 
@@ -25,6 +26,15 @@ def located(anchor: Anchor, text: str) -> str:
     """`text` as a general comment that names its place; the file name is untrusted, so it cannot forge a marker."""
     span = f"{anchor.start_line}-{anchor.line}" if anchor.start_line is not None else str(anchor.line)
     return f"`{safe_text(anchor.path)}:{span}`\n\n{text}"
+
+
+def with_suggestion(body: str, block: str) -> str:
+    """`body` with the suggestion `block` placed before its trailing finding marker, which must stay last: the marker
+    parser takes the last marker, and the suggestion is agent text that may quote one."""
+    at = body.rfind(FINDING_MARKER_PREFIX)
+    if at < 0:
+        return f"{body}\n\n{block}"
+    return f"{body[:at].rstrip()}\n\n{block}\n\n{body[at:]}"
 
 
 def suggestion_fence(code: str) -> str:

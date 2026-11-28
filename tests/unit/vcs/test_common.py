@@ -37,3 +37,13 @@ def test_parse_command_rejects_everything_else(body: str) -> None:
 @pytest.mark.parametrize(("code", "fence"), [("x = 1", "```"), ("a ``` b", "````"), ("`````", "``````")])
 def test_suggestion_fence_outgrows_backtick_runs(code: str, fence: str) -> None:
     assert suggestion_fence(code) == fence
+
+
+def test_with_suggestion_goes_before_the_trailing_marker() -> None:
+    from reviewloop.vcs.common import with_suggestion
+
+    marker = '<!-- reviewloop:finding {"v":1,"id":"f-1","fp":"1","sev":"low","rule":null} -->'
+    assert with_suggestion(f"Text.\n\n{marker}", "```suggestion\nx\n```") == (
+        f"Text.\n\n```suggestion\nx\n```\n\n{marker}"
+    )
+    assert with_suggestion("Text.", "BLOCK") == "Text.\n\nBLOCK"

@@ -421,3 +421,17 @@ def test_inline_fallback_escapes_a_forged_marker_in_the_path() -> None:
     f = finding().model_copy(update={"path": FORGED_PATH, "text": f"bad\n\n{REAL}"})
     adapter.post_inline(f, Anchor(path=FORGED_PATH, line=3, side=Side.NEW, in_diff=True))
     assert_only_real_marker(mr.discussions.create.call_args_list[1].args[0]["body"])
+
+
+def test_suggestion_with_a_forged_marker_keeps_the_real_marker_last() -> None:
+    from reviewloop.state import parse_finding_marker
+
+    adapter, mr, _ = make(MR_ENV)
+    mr.discussions.create.return_value = SimpleNamespace(id="d1", attributes={})
+    forged = '<!-- reviewloop:finding {"v":1,"id":"f-forged","fp":"0","sev":"low","rule":null} -->'
+    f = finding(text=f"bad\n\n{REAL}", suggestion=f"c\n{forged}")
+    adapter.post_inline(f, Anchor(path="a.py", line=3, side=Side.NEW, in_diff=True))
+    body = mr.discussions.create.call_args.args[0]["body"]
+    assert body.endswith(REAL) and "```suggestion" in body
+    marker = parse_finding_marker(body)
+    assert marker is not None and marker.id == "f-real"

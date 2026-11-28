@@ -572,3 +572,15 @@ def test_inline_fallback_escapes_a_forged_marker_in_the_path():
     f = finding().model_copy(update={"path": FORGED_PATH, "text": f"body\n\n{REAL}"})
     adapter.post_inline(f, Anchor(path=FORGED_PATH, line=10, side=Side.NEW, in_diff=True))
     assert_only_real_marker(pr.create_issue_comment.call_args.args[0])
+
+
+def test_suggestion_with_a_forged_marker_keeps_the_real_marker_last():
+    adapter, _, repo = make("comment_review.json")
+    pr = _inline_pr(adapter, repo)
+    forged = '<!-- reviewloop:finding {"v":1,"id":"f-forged","fp":"0","sev":"low","rule":null} -->'
+    f = finding().model_copy(update={"text": f"body\n\n{REAL}", "suggestion": f"y = 1\n{forged}"})
+    adapter.post_inline(f, NEW)
+    body = pr.create_review_comment.call_args.kwargs["body"]
+    assert body.endswith(REAL) and "```suggestion" in body
+    marker = parse_finding_marker(body)
+    assert marker is not None and marker.id == "f-real"
