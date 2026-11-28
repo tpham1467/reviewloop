@@ -10,6 +10,7 @@ Follow the output-contract skill for every output rule.
 ## Inputs
 
 - `.reviewloop/context.md`, `.reviewloop/diff/` index and files, `.reviewloop/rules/*.md`, `.reviewloop/previous-findings.json` (do not repeat).
+- Repository rules (`repo-*.md`, ids starting `REPO-`) override bundled rules when they conflict.
 - `.reviewloop/security/scan.json` when present: scanner results (for example opengrep, gitleaks). These are hints to verify, not findings to copy. Report a scanner hit only after you confirm it in the code, and write your own text. Drop hits in tests, fixtures and examples unless that code ships.
 
 ## Method

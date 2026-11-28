@@ -530,6 +530,23 @@ def test_build_context_writes_repo_rules_for_matching_paths(make_ctx) -> None:
     assert (ctx.sandbox / ".reviewloop" / "diff" / "files" / "app.py.diff").read_text().startswith("--- app.py")
 
 
+def test_build_context_prefixes_repository_rule_ids(make_ctx) -> None:
+    from reviewloop.pipeline.steps.initial.build_context import REPO_RULES_HEADER, BuildContext
+
+    text = "# API rules\n\n- API-1 [high] Controller returns a model.\nCMN-1 [low] Overrides a built-in id.\n"
+    text += "- REPO-OWN-2 [medium] Already prefixed.\nPlain prose with API-9 [x] mid-line stays.\n"
+    ctx = with_diff(make_ctx(files={".reviewloop/rules/api.md": text}))
+    ctx.config = Config.model_validate({"rules": [{"path": "*.py", "file": ".reviewloop/rules/api.md"}]})
+    ctx.stacks = {"common"}
+    BuildContext().run(ctx)
+    written = (ctx.sandbox / ".reviewloop" / "rules" / "repo-1.md").read_text()
+    assert "- REPO-API-1 [high] Controller returns a model." in written
+    assert "\nREPO-CMN-1 [low] Overrides a built-in id." in written
+    assert "- REPO-OWN-2 [medium]" in written and "REPO-REPO-" not in written
+    assert "Plain prose with API-9 [x] mid-line stays." in written
+    assert written.startswith(REPO_RULES_HEADER) and "repository rule wins" in REPO_RULES_HEADER
+
+
 def test_load_config_reads_target_branch(make_ctx) -> None:
     from reviewloop.pipeline.steps.initial.load_config import LoadConfig
 

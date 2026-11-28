@@ -50,7 +50,7 @@ review_drafts: false
 | `security.enabled` | `true` | Run the security review branch |
 | `security.scanners` | `[opengrep, gitleaks]` | Scanners run before the security agents, when installed |
 | `suggestions` | `true` | Attach code suggestions where the platform supports them |
-| `fail_on` | `none` | Exit `1` when a finding is at or above this severity |
+| `fail_on` | `none` | Exit `1` when a finding of an initial review is at or above this severity. A recheck exits `0` or `2` only, unless no earlier review exists and it runs a full review instead |
 | `large_diff_lines` | `3000` | Above this many changed lines the diff is split into groups |
 | `review_drafts` | `false` | Review draft pull requests when they open |
 
@@ -69,8 +69,22 @@ A rule file is Markdown with one rule per line, for example:
 - API-1 [high] A controller action returns an Eloquent model directly. It leaks hidden columns. Return a resource.
 ```
 
-Rule files are read from the target branch. They are added on top of the built-in rules for the detected stacks.
-Use ids that do not collide with the built-in ones (built-in ids start with a stack prefix such as `PY-` or `CMN-`).
+Rule files are read from the target branch. They are added on top of the built-in rules for the detected stacks, and
+a repository rule wins when it conflicts with a built-in one. reviewloop prefixes every rule id with `REPO-`
+(`API-1` becomes `REPO-API-1`), so findings never mix up a repository rule with a built-in id such as `PY-1`.
+
+## Scanners
+
+`security.scanners` runs gitleaks (on the PR's commits) and opengrep (on the changed files) before the security
+agents. Their output is a hint for the agents; a missing scanner is skipped with one log line.
+
+opengrep never downloads rules. It runs with `--config <rules directory> --disable-version-check`:
+
+- In the image the rules are at `/opt/opengrep-rules`: the `opengrep/opengrep-rules` repository pinned to one commit
+  (in `COMMIT` there, checked by sha256 at build time), limited to C#, Go, Java, JavaScript, PHP, Python, TypeScript
+  and the generic rules, without the secret rules (gitleaks covers those). Their license is in `LICENSE` there.
+- Outside the image set `REVIEWLOOP_OPENGREP_RULES` to a directory of opengrep rules. When it is unset and
+  `/opt/opengrep-rules` does not exist, opengrep is skipped; reviewloop never falls back to `--config auto`.
 
 ## Tracker
 

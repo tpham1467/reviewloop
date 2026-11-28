@@ -1,4 +1,5 @@
 import json
+import re
 
 from reviewloop.diff import changed_lines
 from reviewloop.models import Thread
@@ -11,6 +12,19 @@ SECURITY_SETTING = {
     True: "a separate security step runs; skip the Security section of the code-review skill",
     False: "enabled for the code-review step; apply its Security section",
 }
+
+
+# A rule line: `ID [severity] ...`, optionally as a list item (spec 9).
+_RULE_ID = re.compile(r"^(\s*(?:[-*]\s+)?)(?!REPO-)([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d+)(\s+\[)", re.MULTILINE)
+REPO_RULES_HEADER = (
+    "<!-- Repository rules: ids are prefixed REPO-. Where one conflicts with a built-in rule, the repository rule "
+    "wins and the built-in one does not apply. -->\n"
+)
+
+
+def repository_rules(text: str) -> str:
+    """Prefix every rule id with `REPO-` so it never collides with a built-in id in markers (spec 9)."""
+    return REPO_RULES_HEADER + _RULE_ID.sub(r"\1REPO-\2\3", text)
 
 
 def _previous(threads: list[Thread]) -> str:
@@ -64,7 +78,7 @@ class BuildContext:
             if text is None:
                 ctx.log.warning("rule file %s not found on %s", rule.file, pr.target_branch)
                 continue
-            write_input(ctx.sandbox, f"rules/repo-{n + 1}.md", text)
+            write_input(ctx.sandbox, f"rules/repo-{n + 1}.md", repository_rules(text))
 
         write_input(ctx.sandbox, "previous-findings.json", _previous(ctx.previous_threads))
 
