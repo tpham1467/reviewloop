@@ -1,11 +1,10 @@
 """Host git in the CI checkout, run without the runner's git config (hooks, helpers, credentials) or a shell."""
 
-import os
 import re
 import subprocess
 from pathlib import Path
 
-from reviewloop.agents.isolation import GIT_ENV
+from reviewloop.agents.isolation import host_git_env
 
 _SHA = re.compile(r"[0-9a-f]{7,64}")
 
@@ -16,10 +15,11 @@ def is_sha(value: str) -> bool:
 
 
 def run_git(cwd: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
+    """git in the CI checkout `cwd`, which is trusted as `safe.directory` (ruling R83); never call it on a sandbox."""
     return subprocess.run(  # noqa: S603
         ["git", *args],  # noqa: S607
         cwd=cwd,
-        env={**os.environ, **GIT_ENV},
+        env=host_git_env(cwd),
         capture_output=True,
         check=False,
     )

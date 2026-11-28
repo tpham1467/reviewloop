@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -435,7 +436,8 @@ def test_security_branch_verifies_and_merges(make_ctx, monkeypatch) -> None:
         ScanFinding(tool="gitleaks", rule="aws", path="old.py", line=4, message="AWS key", in_history=True),
         ScanFinding(tool="opengrep", rule="sqli", path="app.py", line=2, message="SQL", in_history=False),
     ]
-    monkeypatch.setattr(security_branch, "run_scanners", lambda *a: hits)
+    scanned: list[tuple[object, ...]] = []
+    monkeypatch.setattr(security_branch, "run_scanners", lambda *a: scanned.append(a) or hits)
     sqli = finding(category="security", severity="high", text="SQL injection.", suggestion="x")
     weak = finding(category="security", severity="medium", text="Weak.", existing_code="    return y")
     review = {"findings": [sqli.model_dump(mode="json"), weak.model_dump(mode="json")], "coverage": []}
@@ -447,6 +449,8 @@ def test_security_branch_verifies_and_merges(make_ctx, monkeypatch) -> None:
 
     security_branch.SecurityBranch().run(ctx)
 
+    # gitleaks reads history from the checkout; opengrep scans the head copy.
+    assert scanned[0][1:3] == (ctx.source_dir, ctx.workdir / "sandbox-security")
     scan = json.loads((ctx.workdir / "sandbox-security" / ".reviewloop" / "security" / "scan.json").read_text())
     assert [h["rule"] for h in scan] == ["aws", "sqli"]
     history, kept = ctx.security_findings
@@ -498,6 +502,132 @@ def test_load_config_reads_target_branch(make_ctx) -> None:
     LoadConfig().run(ctx)
     assert (ctx.config.language, ctx.config.suggestions, ctx.agent) == ("vi", False, agent)
     assert ctx.tracker is None
+
+
+def test_load_config_path_from_env_reads_target_branch(make_ctx) -> None:
+    from reviewloop.pipeline.steps.initial.load_config import LoadConfig
+
+    ctx = make_ctx(files={"ci/review.yml": "language: vi\n", ".reviewloop.yml": "language: fr\n"})
+    ctx.env = {"REVIEWLOOP_CONFIG_PATH": "ci/review.yml"}
+    LoadConfig().run(ctx)
+    assert ctx.config.language == "vi"
+    # Still the target branch only: FakeVcs serves files on `main` alone, so another target finds no file.
+    ctx.pr = ctx.pr.model_copy(update={"target_branch": "other"})
+    LoadConfig().run(ctx)
+    assert ctx.config.language == "en"
+
+
+@pytest.mark.parametrize("path", ["../secrets.yml", "ci/../../x.yml", "/etc/passwd", "..\\up.yml"])
+def test_load_config_path_must_stay_in_repo(make_ctx, path: str) -> None:
+    from reviewloop.errors import ConfigError
+    from reviewloop.pipeline.steps.initial.load_config import LoadConfig
+
+    ctx = make_ctx()
+    ctx.env = {"REVIEWLOOP_CONFIG_PATH": path}
+    with pytest.raises(ConfigError, match="REVIEWLOOP_CONFIG_PATH"):
+        LoadConfig().run(ctx)
+
+
+def test_load_config_agent_from_env(make_ctx, monkeypatch) -> None:
+    from reviewloop.pipeline.steps.initial import load_config
+
+    built: list[str] = []
+    ctx = make_ctx(files={".reviewloop.yml": "agent: claude-code\nmodel: sonnet\n"})
+    agent, ctx.agent = ctx.agent, None
+    monkeypatch.setattr(load_config, "get_adapter", lambda name: built.append(name) or agent)
+    ctx.env = {"REVIEWLOOP_AGENT": "codex"}
+    load_config.LoadConfig().run(ctx)
+    assert (ctx.config.agent, ctx.config.model, built) == ("codex", "sonnet", ["codex"])
+
+
+def test_load_config_model_from_env(make_ctx) -> None:
+    from reviewloop.pipeline.steps.initial.load_config import LoadConfig
+
+    ctx = make_ctx(files={".reviewloop.yml": "model: sonnet\nlanguage: vi\n"})
+    ctx.env = {"REVIEWLOOP_MODEL": "opus"}
+    LoadConfig().run(ctx)
+    assert (ctx.config.model, ctx.config.language, ctx.config.agent) == ("opus", "vi", "claude-code")
+
+
+def test_load_config_rejects_invalid_agent_override(make_ctx) -> None:
+    from reviewloop.errors import ConfigError
+    from reviewloop.pipeline.steps.initial.load_config import LoadConfig
+
+    ctx = make_ctx()
+    ctx.env = {"REVIEWLOOP_AGENT": "unknown-cli"}
+    with pytest.raises(ConfigError, match="REVIEWLOOP_AGENT"):
+        LoadConfig().run(ctx)
+
+
+def test_host_git_env_trusts_only_the_checkout(tmp_path, monkeypatch) -> None:
+    from reviewloop.agents.isolation import host_git_env
+
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "2")
+    monkeypatch.setenv("GIT_CONFIG_KEY_1", "core.hooksPath")
+    monkeypatch.setenv("GIT_CONFIG_PARAMETERS", "'core.pager'='x'")
+    checkout = tmp_path / "ci" / ".." / "checkout"
+    env = host_git_env(checkout)
+    assert (env["GIT_CONFIG_COUNT"], env["GIT_CONFIG_KEY_0"]) == ("1", "safe.directory")
+    assert env["GIT_CONFIG_VALUE_0"] == str((tmp_path / "checkout").resolve())
+    assert "GIT_CONFIG_KEY_1" not in env and "GIT_CONFIG_PARAMETERS" not in env
+    assert env["GIT_CONFIG_GLOBAL"] == os.devnull
+    plain = host_git_env()
+    assert not any(k.startswith("GIT_CONFIG_KEY_") or k == "GIT_CONFIG_COUNT" for k in plain)
+
+
+def test_follow_up_git_calls_trust_the_checkout(tmp_path, monkeypatch) -> None:
+    """Lineage git calls (run_git) and the follow-up history rescan (scan_history) use the trusted host env (R83)."""
+    import subprocess
+
+    from reviewloop.pipeline import git
+    from reviewloop.security import scanners
+
+    envs: list[dict[str, str]] = []
+
+    def spy(cmd, **kw):
+        envs.append(kw["env"])
+        return subprocess.CompletedProcess(cmd, 1, b"", b"")
+
+    monkeypatch.setattr(git.subprocess, "run", spy)
+    git.run_git(tmp_path, "merge-base", "--is-ancestor", "a" * 40, "b" * 40)
+    monkeypatch.setattr(scanners.shutil, "which", lambda n: "/bin/gitleaks")
+    monkeypatch.setattr(scanners.subprocess, "run", spy)
+    scanners.scan_history(tmp_path, "a" * 40, "b" * 40)
+
+    assert [(e["GIT_CONFIG_KEY_0"], e["GIT_CONFIG_VALUE_0"]) for e in envs] == [
+        ("safe.directory", str(tmp_path.resolve()))
+    ] * 2
+
+
+def test_host_git_trust_reaches_checkout_calls_not_sandbox(make_ctx, pr_repo, monkeypatch) -> None:
+    import subprocess
+
+    from reviewloop.agents import isolation
+    from reviewloop.pipeline.steps.initial.get_diff import GetDiff
+    from reviewloop.pipeline.steps.initial.init_context import InitContext
+
+    repo, base, head = pr_repo
+    calls: list[tuple[str, dict[str, str]]] = []
+    real = subprocess.run
+
+    def spy(cmd, **kw):
+        calls.append((str(kw.get("cwd")), kw.get("env") or {}))
+        return real(cmd, **kw)
+
+    monkeypatch.setattr(isolation.subprocess, "run", spy)
+    ctx = make_ctx(source_dir=repo, sandbox=False, base_sha=base, head_sha=head)
+    InitContext().run(ctx)
+    GetDiff().run(ctx)
+
+    trusted = str(repo.resolve())
+    sandbox = str(ctx.sandbox)
+    by_cwd: dict[str, set[str | None]] = {}
+    for cwd, env in calls:
+        by_cwd.setdefault(cwd, set()).add(env.get("GIT_CONFIG_VALUE_0"))
+    # Every call in the checkout (strip, rev check, get-diff) trusts exactly the checkout.
+    assert by_cwd[str(repo)] == {trusted}
+    # Calls inside the sandbox never carry a safe.directory entry.
+    assert by_cwd[sandbox] == {None}
 
 
 def _host_git_has_attr_source() -> bool:
@@ -668,12 +798,17 @@ def test_scanner_history_and_lineless_hits_are_forced_general(make_ctx, monkeypa
 def test_init_context_strips_checkout_credentials(make_ctx, pr_repo, run_git) -> None:
     from reviewloop.pipeline.steps.initial.init_context import InitContext
 
-    repo, _, _ = pr_repo
+    repo, base, head = pr_repo
     token = "glcbt-" + "x" * 20
     run_git(repo, "remote", "add", "origin", f"https://gitlab-ci-token:{token}@gitlab.example.com/g/p.git")
-    ctx = make_ctx(source_dir=repo, sandbox=False)
+    # The CI checkout is the base; the sandbox must still hold the PR head (ruling R80).
+    run_git(repo, "checkout", "-q", "--detach", base)
+    ctx = make_ctx(source_dir=repo, sandbox=False, base_sha=base, head_sha=head)
 
     InitContext().run(ctx)
+
+    assert run_git(ctx.sandbox, "rev-parse", "HEAD") == head
+    assert (ctx.sandbox / "poetry.lock").is_file()
 
     assert run_git(repo, "remote", "get-url", "origin") == "https://gitlab.example.com/g/p.git"
     assert token not in (repo / ".git" / "config").read_text()

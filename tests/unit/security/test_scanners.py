@@ -62,7 +62,7 @@ def test_missing_scanner_skipped(monkeypatch: pytest.MonkeyPatch, caplog: pytest
     calls: list[list[str]] = []
     monkeypatch.setattr(scanners.subprocess, "run", _fake_run(calls))
     with caplog.at_level("INFO", logger="reviewloop.security"):
-        out = run_scanners(["opengrep", "gitleaks"], tmp_path, "a", "b", ["x.py"])
+        out = run_scanners(["opengrep", "gitleaks"], tmp_path, tmp_path, "a", "b", ["x.py"])
     assert out == []
     assert calls == []
     assert "not installed" in caplog.text
@@ -72,7 +72,7 @@ def test_parse_opengrep_sarif(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     _installed(monkeypatch, "opengrep")
     calls: list[list[str]] = []
     monkeypatch.setattr(scanners.subprocess, "run", _fake_run(calls, sarif=SARIF))
-    out = run_scanners(["opengrep"], tmp_path, "a", "b", ["app/views.py"])
+    out = run_scanners(["opengrep"], tmp_path, tmp_path, "a", "b", ["app/views.py"])
     assert out == [
         ScanFinding(
             "opengrep",
@@ -91,7 +91,7 @@ def test_opengrep_skipped_without_changed_paths(monkeypatch: pytest.MonkeyPatch,
     _installed(monkeypatch, "opengrep")
     calls: list[list[str]] = []
     monkeypatch.setattr(scanners.subprocess, "run", _fake_run(calls, sarif=SARIF))
-    assert run_scanners(["opengrep"], tmp_path, "a", "b", []) == []
+    assert run_scanners(["opengrep"], tmp_path, tmp_path, "a", "b", []) == []
     assert calls == []
 
 
@@ -99,7 +99,7 @@ def test_parse_gitleaks_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     _installed(monkeypatch, "gitleaks")
     calls: list[list[str]] = []
     monkeypatch.setattr(scanners.subprocess, "run", _fake_run(calls, gitleaks=GITLEAKS_JSON))
-    out = run_scanners(["gitleaks"], tmp_path, "base", "head", [])
+    out = run_scanners(["gitleaks"], tmp_path, tmp_path, "base", "head", [])
     assert out == [ScanFinding("gitleaks", "github-pat", "src/config.py", 12, "GitHub Personal Access Token", True)]
     assert "--log-opts=base..head" in calls[0]
     assert "--redact" in calls[0]
@@ -108,7 +108,7 @@ def test_parse_gitleaks_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
 def test_gitleaks_secret_value_never_in_message(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     _installed(monkeypatch, "gitleaks")
     monkeypatch.setattr(scanners.subprocess, "run", _fake_run([], gitleaks=GITLEAKS_JSON))
-    out = run_scanners(["gitleaks"], tmp_path, "base", "head", [])
+    out = run_scanners(["gitleaks"], tmp_path, tmp_path, "base", "head", [])
     assert FAKE_SECRET not in repr(out)
 
 
@@ -125,7 +125,7 @@ def test_scanner_failure_is_skipped(
 
     monkeypatch.setattr(scanners.subprocess, "run", run)
     with caplog.at_level("WARNING", logger="reviewloop.security"):
-        assert run_scanners(["gitleaks", "opengrep"], tmp_path, "a", "b", ["x.py"]) == []
+        assert run_scanners(["gitleaks", "opengrep"], tmp_path, tmp_path, "a", "b", ["x.py"]) == []
     assert "skipped" in caplog.text
     assert FAKE_SECRET not in caplog.text
 
@@ -139,7 +139,7 @@ def test_garbage_report_is_skipped(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     monkeypatch.setattr(scanners.subprocess, "run", run)
-    assert run_scanners([tool], tmp_path, "a", "b", ["x.py"]) == []
+    assert run_scanners([tool], tmp_path, tmp_path, "a", "b", ["x.py"]) == []
 
 
 def test_scanner_without_report_does_not_read_other_report(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -151,7 +151,7 @@ def test_scanner_without_report_does_not_read_other_report(monkeypatch: pytest.M
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     monkeypatch.setattr(scanners.subprocess, "run", run)
-    out = run_scanners(["gitleaks", "opengrep"], tmp_path, "a", "b", ["x.py"])
+    out = run_scanners(["gitleaks", "opengrep"], tmp_path, tmp_path, "a", "b", ["x.py"])
     assert [f.tool for f in out] == ["gitleaks"]
 
 
@@ -160,13 +160,13 @@ def test_opengrep_paths_follow_double_dash(monkeypatch: pytest.MonkeyPatch, tmp_
     calls: list[list[str]] = []
     monkeypatch.setattr(scanners.subprocess, "run", _fake_run(calls, sarif=SARIF))
     evil = "--config=https://evil.example/rules.yml"
-    run_scanners(["opengrep"], tmp_path, "a", "b", [evil])
+    run_scanners(["opengrep"], tmp_path, tmp_path, "a", "b", [evil])
     assert calls[0][calls[0].index(evil) - 1] == "--"
 
 
 def test_unknown_scanner_ignored(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     _installed(monkeypatch, "nope")
-    assert run_scanners(["nope"], tmp_path, "a", "b", ["x"]) == []
+    assert run_scanners(["nope"], tmp_path, tmp_path, "a", "b", ["x"]) == []
 
 
 def test_scan_history_runs_gitleaks_on_the_range(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
@@ -190,3 +190,21 @@ def test_scan_history_unavailable_is_none(monkeypatch: pytest.MonkeyPatch, tmp_p
     _installed(monkeypatch, "gitleaks")
     monkeypatch.setattr(scanners.subprocess, "run", _fake_run([], returncode=2))
     assert scan_history(tmp_path, "a", "b") is None
+
+
+def test_opengrep_scans_tree_gitleaks_scans_repo(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    _installed(monkeypatch, "gitleaks", "opengrep")
+    cwds: dict[str, Path] = {}
+    trust: dict[str, str | None] = {}
+
+    def run(cmd: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+        cwds[cmd[0]] = kw["cwd"]
+        trust[cmd[0]] = (kw["env"] or {}).get("GIT_CONFIG_VALUE_0")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(scanners.subprocess, "run", run)
+    repo, tree = tmp_path / "checkout", tmp_path / "sandbox-security"
+    run_scanners(["gitleaks", "opengrep"], repo, tree, "a", "b", ["x.py"])
+    assert cwds == {"gitleaks": repo, "opengrep": tree}
+    # gitleaks runs git in the checkout, which is trusted; opengrep reads the head copy and gets no git trust.
+    assert trust == {"gitleaks": str(repo.resolve()), "opengrep": None}

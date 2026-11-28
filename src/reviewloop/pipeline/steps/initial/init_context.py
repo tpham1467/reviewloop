@@ -11,4 +11,4 @@ class InitContext:
     def run(self, ctx: RunContext) -> None:
         strip_checkout_credentials(ctx.source_dir)
         ctx.workdir.mkdir(parents=True, exist_ok=True)
-        prepare_sandbox(ctx.source_dir, ctx.sandbox)
+        prepare_sandbox(ctx.source_dir, ctx.sandbox, ctx.pr.head_sha)

@@ -12,6 +12,7 @@ class PostFollowUpComments:
     group: str | None = None
 
     def run(self, ctx: RunContext) -> None:
+        ctx.posting_started = True
         assert ctx.follow_up is not None  # noqa: S101 - set by resolve-target-turn
         follow = ctx.follow_up
         # Checked right before posting: the agent call above can take minutes.

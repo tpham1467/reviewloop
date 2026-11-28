@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from reviewloop.agents.isolation import host_git_env
+
 log = logging.getLogger("reviewloop.security")
 
 TIMEOUT_SECONDS = 90
@@ -72,13 +74,17 @@ def _parse_sarif(report: Path) -> list[ScanFinding]:
 
 
 def _run(
-    cmd: list[str], workdir: Path, report: Path, parse: Callable[[Path], list[ScanFinding]]
+    cmd: list[str],
+    workdir: Path,
+    report: Path,
+    parse: Callable[[Path], list[ScanFinding]],
+    env: dict[str, str] | None = None,
 ) -> list[ScanFinding] | None:
     """The scanner's findings, or None when it could not run or its report could not be read."""
     name = cmd[0]
     try:
         proc = subprocess.run(  # noqa: S603
-            cmd, cwd=workdir, capture_output=True, text=True, timeout=TIMEOUT_SECONDS, check=False
+            cmd, cwd=workdir, env=env, capture_output=True, text=True, timeout=TIMEOUT_SECONDS, check=False
         )
         if proc.returncode != 0:
             # stderr is not logged: it may echo scanned content.
@@ -98,7 +104,8 @@ def _gitleaks(workdir: Path, base_sha: str, head_sha: str, tmp: str) -> list[Sca
         "gitleaks", "git", f"--log-opts={base_sha}..{head_sha}", "--report-format", "json",
         "--report-path", str(report), "--redact", "--exit-code", "0", str(workdir),
     ]  # fmt: skip
-    return _run(cmd, workdir, report, _parse_gitleaks)
+    # gitleaks runs git in the checkout, so it gets the trusted host git env (ruling R83).
+    return _run(cmd, workdir, report, _parse_gitleaks, host_git_env(workdir))
 
 
 def scan_history(workdir: Path, base_sha: str, head_sha: str) -> list[ScanFinding] | None:
@@ -112,8 +119,10 @@ def scan_history(workdir: Path, base_sha: str, head_sha: str) -> list[ScanFindin
 
 
 def run_scanners(
-    names: list[str], workdir: Path, base_sha: str, head_sha: str, changed_paths: list[str]
+    names: list[str], repo: Path, tree: Path, base_sha: str, head_sha: str, changed_paths: list[str]
 ) -> list[ScanFinding]:
+    """gitleaks reads `base_sha..head_sha` from the git history of `repo`; opengrep scans the files of `tree`, a copy
+    checked out at the PR head (the CI checkout `repo` may be the base branch)."""
     findings: list[ScanFinding] = []
     with tempfile.TemporaryDirectory(prefix="reviewloop-scan-") as tmp:
         for name in names:
@@ -124,12 +133,12 @@ def run_scanners(
                 log.info("%s not installed, skipped", name)
                 continue
             if name == "gitleaks":
-                findings += _gitleaks(workdir, base_sha, head_sha, tmp) or []
+                findings += _gitleaks(repo, base_sha, head_sha, tmp) or []
             else:
                 if not changed_paths:
                     log.info("opengrep skipped: no changed files")
                     continue
                 report = Path(tmp) / "opengrep.sarif"
                 cmd = ["opengrep", "scan", "--sarif", "--output", str(report), "--config", "auto", "--quiet"]
-                findings += _run([*cmd, "--", *changed_paths], workdir, report, _parse_sarif) or []
+                findings += _run([*cmd, "--", *changed_paths], tree, report, _parse_sarif) or []
     return findings

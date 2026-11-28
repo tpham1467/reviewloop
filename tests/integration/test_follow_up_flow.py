@@ -343,7 +343,7 @@ def test_thread_input_code_at_anchor_edge_cases(make_ctx, follow_repo) -> None:
     ctx.vcs.thread_list = [thread("f-aaaaaa", "t1", path=None), thread("f-bbbbbb", "t2", path="gone.py"),
                            thread("f-cccccc", "t3", path="../outside.py"),
                            thread("f-dddddd", "t4", side=Side.OLD)]  # fmt: skip
-    prepare_sandbox(repo, ctx.sandbox)
+    prepare_sandbox(repo, ctx.sandbox, head)
     ResolveTargetTurn([]).run(ctx)
     LoadThreadInputs().run(ctx)
 

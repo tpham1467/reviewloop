@@ -12,10 +12,16 @@ from reviewloop.agents.isolation import (
     strip_checkout_credentials,
     verify_only_output_changed,
 )
-from reviewloop.errors import AgentStepError
+from reviewloop.errors import AgentStepError, ReviewloopError
 
 OUTPUT = Path(".reviewloop/out/review.json")
+
+
 TRANSCRIPT = Path(".reviewloop/logs/review-1.jsonl")
+
+
+def _head(repo: Path) -> str:
+    return _git(repo, "rev-parse", "HEAD").strip()
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -36,7 +42,7 @@ def test_sandbox_has_no_remote_or_credentials(source_repo: Path, tmp_path: Path)
     _git(source_repo, "config", "credential.helper", "store")
     (source_repo / ".git" / "hooks" / "post-checkout").write_text("#!/bin/sh\necho pwned\n")
 
-    sandbox = prepare_sandbox(source_repo, tmp_path / "sandbox")
+    sandbox = prepare_sandbox(source_repo, tmp_path / "sandbox", _head(source_repo))
 
     config = _git(sandbox, "config", "--list")
     assert "ghp_FAKE" not in config
@@ -49,7 +55,7 @@ def test_sandbox_has_no_remote_or_credentials(source_repo: Path, tmp_path: Path)
 def test_sandbox_matches_source_head_with_history(source_repo: Path, tmp_path: Path) -> None:
     head = _git(source_repo, "rev-parse", "HEAD").strip()
 
-    sandbox = prepare_sandbox(source_repo, tmp_path / "sandbox")
+    sandbox = prepare_sandbox(source_repo, tmp_path / "sandbox", _head(source_repo))
 
     assert _git(sandbox, "rev-parse", "HEAD").strip() == head
     assert len(_git(sandbox, "log", "--oneline").splitlines()) == 2
@@ -57,17 +63,35 @@ def test_sandbox_matches_source_head_with_history(source_repo: Path, tmp_path: P
     assert (sandbox / ".reviewloop" / "out").is_dir()
 
 
-def test_sandbox_follows_detached_source_head(source_repo: Path, tmp_path: Path) -> None:
+def test_sandbox_checks_out_rev_not_source_head(source_repo: Path, tmp_path: Path) -> None:
+    head = _head(source_repo)
+    # The CI checkout is the base (one commit back); the PR head is reachable from no ref, as after a fetch by refspec.
+    branch = _git(source_repo, "symbolic-ref", "--short", "HEAD").strip()
     _git(source_repo, "checkout", "-q", "--detach", "HEAD~1")
-    head = _git(source_repo, "rev-parse", "HEAD").strip()
+    _git(source_repo, "branch", "-D", branch)
+    assert (source_repo / "app.py").read_text() == "print('hi')\n"
 
-    sandbox = prepare_sandbox(source_repo, tmp_path / "sandbox")
+    sandbox = prepare_sandbox(source_repo, tmp_path / "sandbox", head)
 
     assert _git(sandbox, "rev-parse", "HEAD").strip() == head
+    assert (sandbox / "app.py").read_text() == "print('hello')\n"
+    assert _git(sandbox, "remote").strip() == ""
+
+
+def test_sandbox_missing_rev_names_fetch(source_repo: Path, tmp_path: Path) -> None:
+    with pytest.raises(ReviewloopError, match=r"refs/pull/<n>/head.*refs/merge-requests/<iid>/head"):
+        prepare_sandbox(source_repo, tmp_path / "sandbox", "f" * 40)
+    assert not (tmp_path / "sandbox").exists()
+
+
+@pytest.mark.parametrize("rev", ["HEAD", "abc123", "--upload-pack=x", "A" * 40])
+def test_sandbox_rejects_non_sha_rev(source_repo: Path, tmp_path: Path, rev: str) -> None:
+    with pytest.raises(ReviewloopError, match="full hex commit id"):
+        prepare_sandbox(source_repo, tmp_path / "sandbox", rev)
 
 
 def test_sandbox_strips_rewrite_and_include_config(source_repo: Path, tmp_path: Path) -> None:
-    sandbox = prepare_sandbox(source_repo, tmp_path / "sandbox")
+    sandbox = prepare_sandbox(source_repo, tmp_path / "sandbox", _head(source_repo))
     # A clone never copies the source config, so plant the keys in the sandbox and strip again.
     _git(sandbox, "config", "url.https://ghp_FAKE0000@github.com/.insteadOf", "https://github.com/")
     _git(sandbox, "config", "includeIf.gitdir:/.path", "evil.cfg")
@@ -98,7 +122,7 @@ def test_committed_symlinks_become_plain_files(source_repo: Path, tmp_path: Path
     (source_repo / "p").symlink_to("/proc")
     _commit(source_repo, "cfg", "p")
 
-    sandbox = prepare_sandbox(source_repo, tmp_path / "sandbox")
+    sandbox = prepare_sandbox(source_repo, tmp_path / "sandbox", _head(source_repo))
 
     for name, target in (("cfg", str(secret)), ("p", "/proc")):
         path = sandbox / name
@@ -128,7 +152,7 @@ def test_committed_reviewloop_path_is_replaced(source_repo: Path, tmp_path: Path
         (source_repo / ".reviewloop" / "out" / "review.json").write_text('{"message": "planted", "count": 1}')
     _commit(source_repo, ".reviewloop")
 
-    sandbox = prepare_sandbox(source_repo, tmp_path / "sandbox")
+    sandbox = prepare_sandbox(source_repo, tmp_path / "sandbox", _head(source_repo))
 
     root = sandbox / ".reviewloop"
     assert root.is_dir()
@@ -153,7 +177,7 @@ def test_committed_agent_config_is_removed(source_repo: Path, tmp_path: Path) ->
         (source_repo / rel).write_text(text)
     _commit(source_repo, *files)
 
-    sandbox = prepare_sandbox(source_repo, tmp_path / "sandbox")
+    sandbox = prepare_sandbox(source_repo, tmp_path / "sandbox", _head(source_repo))
 
     assert not (sandbox / ".claude").exists()
     assert not (sandbox / "sub" / ".claude").exists()
@@ -193,7 +217,7 @@ def test_committed_codex_and_cursor_config_is_removed(source_repo: Path, tmp_pat
         (source_repo / rel).write_text(text)
     _commit(source_repo, *files)
 
-    sandbox = prepare_sandbox(source_repo, tmp_path / "sandbox")
+    sandbox = prepare_sandbox(source_repo, tmp_path / "sandbox", _head(source_repo))
 
     for rel in (".codex", ".agents/skills", ".cursor", "sub/.agents/skills", "sub/.cursor"):
         assert not (sandbox / rel).exists(), rel
@@ -328,7 +352,7 @@ def test_committed_reviewloop_files_do_not_show_as_deleted(source_repo: Path, tm
     (source_repo / ".reviewloop" / "notes.txt").write_text("planted")
     _commit(source_repo, ".reviewloop")
 
-    sandbox = prepare_sandbox(source_repo, tmp_path / "sandbox")
+    sandbox = prepare_sandbox(source_repo, tmp_path / "sandbox", _head(source_repo))
 
     assert _git(sandbox, "diff", "--name-status") == ""
 
@@ -345,21 +369,21 @@ def test_sandbox_ignores_runner_global_git_config(
     config.write_text(f"[core]\n\thooksPath = {hooks}\n")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
 
-    prepare_sandbox(source_repo, tmp_path / "sandbox")
+    prepare_sandbox(source_repo, tmp_path / "sandbox", _head(source_repo))
 
     assert not marker.exists()
 
 
 def test_sandbox_fails_clearly_for_non_repo(tmp_path: Path) -> None:
     with pytest.raises(AgentStepError, match="sandbox"):
-        prepare_sandbox(tmp_path / "missing", tmp_path / "sandbox")
+        prepare_sandbox(tmp_path / "missing", tmp_path / "sandbox", "a" * 40)
 
 
 def test_sandbox_fails_clearly_for_dir_without_git(tmp_path: Path) -> None:
     (tmp_path / "plain").mkdir()
 
     with pytest.raises(AgentStepError, match="sandbox: git rev-parse failed"):
-        prepare_sandbox(tmp_path / "plain", tmp_path / "sandbox")
+        prepare_sandbox(tmp_path / "plain", tmp_path / "sandbox", "a" * 40)
 
 
 def test_scrub_env_drops_vcs_tokens(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -82,7 +82,8 @@ class GitHubAdapter:
         self._repo_name = repo
         self._event_path = event_path
         self._event_name = event_name
-        self._gh = Github(auth=Auth.Token(token))
+        # Lazy: no request until data is read, so an ignored event costs no API call (ruling R81).
+        self._gh = Github(auth=Auth.Token(token), lazy=True)
         self._repo = self._gh.get_repo(repo)
         self._payload: dict[str, Any] | None = None
         self._bot: User | None = None
