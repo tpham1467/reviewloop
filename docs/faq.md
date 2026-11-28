@@ -25,14 +25,14 @@ your own variables.
 
 ## "detected dubious ownership in repository"
 
-git refuses a repository owned by another user. The image runs as uid 1001, and reviewloop runs its git commands with
-global and system config disabled, marking exactly the CI checkout path as `safe.directory`: never `*`, never the agent
-sandbox. One step is not covered yet: the local clone that builds the agent sandbox, because git does not pass that
-setting on to the clone's `upload-pack`. Until it is, run the container as the checkout's owner:
+git refuses a repository owned by another user. reviewloop does not need to own the checkout: it runs its git commands
+with global and system config disabled and trusts exactly the CI checkout path through `safe.directory`, including the
+clone that builds the agent sandbox. It never trusts `*` or the sandbox. The image runs as uid 1001, so a root-owned
+GitLab checkout works as is.
 
-- the GitHub Action already runs it as the runner's user;
-- the GitLab component runs it as root, the owner of the runner's checkout;
-- elsewhere, `docker run --user "$(stat -c %u:%g .)" ...` from the checkout.
+If you still see this error, it comes from a git command in your own job script, not from reviewloop: run it with
+`git -c safe.directory="$PWD" ...`. The job also needs write access to the working directory for `reviewloop.json` and
+`reviewloop.sarif`.
 
 ## My GitLab merge request has no reviewloop job
 

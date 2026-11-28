@@ -51,10 +51,10 @@ The job runs on `merge_request_event` and `trigger` pipelines. It is not `interr
 on one ref, so auto-cancel would stop reviews of other merge requests. Two runs on one merge request do not collide:
 each re-reads the run state before posting and the later one stops.
 
-The job runs the image as root (`image: docker: user: "0"`, Docker and Kubernetes executors). The runner clones the
-checkout as root, and git refuses a repository owned by another user. reviewloop trusts exactly the checkout path for
-its own git calls, but the local clone that builds the agent sandbox does not pass that setting on yet, so the
-override stays until it does.
+The image runs as uid 1001, a non-root user. The runner's checkout is owned by root, which git would refuse;
+reviewloop trusts exactly that checkout path for its git calls (`safe.directory`), so no `user` override is needed.
+The job writes `reviewloop.json` and `reviewloop.sarif` into the checkout, which needs write access for uid 1001 (the
+default for Docker executor builds).
 
 ## 4. Enable merge request pipelines
 

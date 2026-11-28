@@ -509,8 +509,7 @@ def test_init_writes_default_config(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert result.exit_code == 0, result.output
     text = (tmp_path / ".reviewloop.yml").read_text()
     assert load_config(text) == Config()
-    assert "GIT_DEPTH: 0" in result.stdout
-    assert "ghcr.io/tpham1467/reviewloop:0" in result.stdout
+    assert "component: $CI_SERVER_FQDN/tpham1467/reviewloop/reviewloop@0" in result.stdout
 
     (tmp_path / ".reviewloop.yml").write_text("language: vi\n")
     refused = runner.invoke(cli.app, ["init", "--platform", "gitlab"])
@@ -522,26 +521,56 @@ def test_init_writes_default_config(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert load_config((tmp_path / ".reviewloop.yml").read_text()) == Config()
 
 
+EXAMPLES = Path(__file__).resolve().parents[2] / "examples"
+
+
+@pytest.mark.parametrize(
+    ("name", "example"),
+    [
+        ("github", "github-workflow.yml"),
+        ("gitlab", "gitlab-ci.yml"),
+        ("bitbucket-cloud", "bitbucket-pipelines.yml"),
+        ("bitbucket-dc", "Jenkinsfile"),
+    ],
+)
+def test_init_snippet_is_the_example_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, example: str
+) -> None:
+    # The docs and the examples are reviewed as one; `init` must print exactly the same file.
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(cli.app, ["init", "--platform", name])
+    assert result.exit_code == 0, result.output
+    assert result.stdout == (EXAMPLES / example).read_text(encoding="utf-8") + "\n"
+
+
 def test_init_github_snippet(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(cli.app, ["init"], env={"GITHUB_ACTIONS": "true"})
     assert result.exit_code == 0
     out = result.stdout
-    for text in ("persist-credentials: false", "fetch-depth: 0", "uses: tpham1467/reviewloop@v0"):
+    for text in (
+        "persist-credentials: false",
+        "fetch-depth: 0",
+        "uses: tpham1467/reviewloop@v0",
+        "ref: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}",
+        "timeout-minutes:",
+        'echo "::add-mask::$auth"',
+        'contains(fromJSON(\'["OWNER","MEMBER","COLLABORATOR"]\'), github.event.comment.author_association)',
+    ):
         assert text in out
-    assert 'fetch --no-tags origin "refs/pull/${PR_NUMBER}/head"' in out
-    assert "PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}" in out
+    assert "issues: write" not in out
+    assert '"+refs/pull/${PR_NUMBER}/head:refs/remotes/pull/${PR_NUMBER}/head"' in out
     # The token goes to the fetch command only; checkout keeps no credential.
     assert out.count("GH_TOKEN") == 2 and "extraheader" in out
     # Concurrency sits under the job, after its `if`, so a plain comment cannot cancel a review.
     assert out.index("concurrency:") > out.index("if: >-") > out.index("jobs:")
 
 
-def test_init_gitlab_snippet_fetches_mr_head(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_init_gitlab_snippet_includes_component(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     out = runner.invoke(cli.app, ["init", "--platform", "gitlab"]).stdout
-    assert '"refs/merge-requests/${MR_IID}/head"' in out
-    assert "CI_MERGE_REQUEST_IID" in out and "TRIGGER_PAYLOAD" in out
+    assert "include:\n  - component: $CI_SERVER_FQDN/tpham1467/reviewloop/reviewloop@0\n" in out
+    assert '$CI_PIPELINE_SOURCE == "trigger"' in out and "when: never" in out
 
 
 @pytest.mark.parametrize("name", ["bitbucket-cloud", "bitbucket-dc"])

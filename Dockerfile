@@ -78,4 +78,6 @@ ENV PATH=/opt/reviewloop/bin:/opt/agents/bin:${PATH} \
     PYTHONUNBUFFERED=1
 
 USER 1001
-ENTRYPOINT ["reviewloop", "run"]
+# `docker run <image>` runs `reviewloop run`; `docker run <image> version` (or review, recheck, init) runs that command.
+ENTRYPOINT ["reviewloop"]
+CMD ["run"]

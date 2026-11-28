@@ -22,11 +22,6 @@ reviewloop:
   image:
     name: ghcr.io/tpham1467/reviewloop:$[[ inputs.image_tag ]]
     entrypoint: [""]
-    # The runner clones the checkout as root. reviewloop trusts that path through safe.directory, but git does not pass
-    # that setting to the upload-pack of the local clone that builds the agent sandbox, so a non-root job still fails
-    # with "dubious ownership". Run as root until the sandbox clone trusts the checkout too; then drop these lines.
-    docker:
-      user: "0"
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_PIPELINE_SOURCE == "trigger"
@@ -57,10 +52,13 @@ reviewloop:
       if [ -n "$mr" ]; then
         iid=${mr%% *}
         target=${mr#* }
+        # The runner's checkout is owned by root and the job runs as uid 1001: trust exactly this checkout.
         # A failed fetch or checkout is an infrastructure error: exit 2, like reviewloop itself.
-        git fetch --no-tags --quiet origin "+refs/heads/${target}:refs/remotes/origin/${target}" \
+        git -c safe.directory="$CI_PROJECT_DIR" fetch --no-tags --quiet origin \
+          "+refs/heads/${target}:refs/remotes/origin/${target}" \
           "+refs/merge-requests/${iid}/head:refs/remotes/merge-requests/${iid}/head" || exit 2
-        git -c advice.detachedHead=false checkout --quiet --detach "refs/remotes/origin/${target}" || exit 2
+        git -c safe.directory="$CI_PROJECT_DIR" -c advice.detachedHead=false \
+          checkout --quiet --detach "refs/remotes/origin/${target}" || exit 2
       fi
     - reviewloop run
   artifacts:
