@@ -65,3 +65,5 @@ nav:
   - Architecture decisions:
       - "0001: Record architecture decisions": adr/0001-record-architecture-decisions.md
       - "0002: Agent tool restriction": adr/0002-agent-tool-restriction.md
+  - Maintainers:
+      - Releasing: maintainers/release.md
