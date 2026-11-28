@@ -8,6 +8,7 @@ file (plus the transcript reviewloop writes and the git index that `git diff` re
 import hashlib
 import os
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -77,6 +78,16 @@ def host_git_env(trusted: Path | None = None) -> dict[str, str]:
     if trusted is not None:
         env.update(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="safe.directory", GIT_CONFIG_VALUE_0=str(trusted.resolve()))
     return env
+
+
+def trusted_upload_pack(source: Path) -> str:
+    """`--upload-pack` for a clone or fetch from the CI checkout `source` (ruling R83b).
+
+    git does not pass env-set config to the upload-pack it spawns for a local clone, so the `safe.directory` entry of
+    `host_git_env` does not reach it; the command names the repository itself. git runs the value through a shell,
+    so the path is shell-quoted. Exactly this repository is trusted, never `*`.
+    """
+    return f"git -c {shlex.quote(f'safe.directory={source.resolve()}/.git')} upload-pack"
 
 
 def _git(cwd: Path, *args: str, stdin: str | None = None, trust: Path | None = None) -> str:
@@ -212,7 +223,8 @@ def prepare_sandbox(source: Path, dest: Path, rev: str) -> Path:
         raise ReviewloopError(f"sandbox: commit {rev} is not in the CI checkout; {HEAD_FETCH_HINT}") from None
     dest.parent.mkdir(parents=True, exist_ok=True)
     # upload-pack runs in `source`, so the clone and the fetch below need it trusted; nothing trusts `dest`.
-    clone = ("clone", "--no-local", "--no-hardlinks", "--no-checkout", "--quiet", str(source), str(dest))
+    upload_pack = f"--upload-pack={trusted_upload_pack(source)}"
+    clone = ("clone", "--no-local", "--no-hardlinks", "--no-checkout", "--quiet", upload_pack, str(source), str(dest))
     _git(dest.parent, *clone, trust=source)
     _strip_config(dest)
     _git(dest, "config", "--local", "core.symlinks", "false")
@@ -223,7 +235,7 @@ def prepare_sandbox(source: Path, dest: Path, rev: str) -> Path:
         _git(dest, "cat-file", "-e", f"{rev}^{{commit}}")
     except AgentStepError:
         # The clone copies refs only; a head that no ref reaches is fetched by id.
-        _git(dest, "fetch", "--quiet", "--no-tags", str(source), rev, trust=source)
+        _git(dest, "fetch", "--quiet", "--no-tags", upload_pack, str(source), rev, trust=source)
     _git(dest, "-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", rev)
     _clean_tree(dest)
     (dest / ".reviewloop" / "out").mkdir(parents=True)

@@ -1,0 +1,125 @@
+"""The CI checkout owned by another user (a container running as a different uid, ruling R83b).
+
+Changing a file's owner needs root, so a small LD_PRELOAD shim makes `stat` report a foreign owner for paths under
+the checkout; git's safe.directory check then fails exactly as it does in the container.
+"""
+
+import os
+import shlex
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from reviewloop.agents import isolation
+from reviewloop.agents.isolation import prepare_sandbox, trusted_upload_pack
+
+SHIM = r"""
+#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+static int foreign(const char *p) {
+    const char *u = getenv("FAKE_FOREIGN_UNDER");
+    return u && p && strncmp(p, u, strlen(u)) == 0;
+}
+#define WRAP(name, type) int name(const char *path, type *st) { \
+    static int (*real)(const char *, type *); if (!real) real = dlsym(RTLD_NEXT, #name); \
+    int r = real(path, st); if (r == 0 && foreign(path)) st->st_uid = 4242; return r; }
+WRAP(stat, struct stat)
+WRAP(lstat, struct stat)
+WRAP(stat64, struct stat64)
+WRAP(lstat64, struct stat64)
+"""
+GIT_IDENTITY = {"GIT_AUTHOR_NAME": "Dev", "GIT_AUTHOR_EMAIL": "dev@example.test", "GIT_COMMITTER_NAME": "Dev",
+                "GIT_COMMITTER_EMAIL": "dev@example.test"}  # fmt: skip
+
+
+def _git(cwd: Path, *args: str) -> str:
+    env = {**os.environ, **isolation.GIT_ENV, **GIT_IDENTITY}
+    return subprocess.run(["git", *args], cwd=cwd, env=env, check=True, capture_output=True, text=True).stdout  # noqa: S603, S607
+
+
+@pytest.fixture
+def foreign_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, str]:
+    """A checkout whose files git sees as owned by another uid; the PR head is reachable from no ref."""
+    if shutil.which("gcc") is None:
+        pytest.skip("gcc is needed to build the ownership shim")
+    (tmp_path / "shim.c").write_text(SHIM)
+    shim = tmp_path / "shim.so"
+    subprocess.run(["gcc", "-shared", "-fPIC", "-o", str(shim), str(tmp_path / "shim.c"), "-ldl"], check=True)  # noqa: S603, S607
+    repo = tmp_path / "checkout dir $(touch pwned)"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    (repo / "app.py").write_text("base\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "base")
+    (repo / "app.py").write_text("head\n")
+    _git(repo, "commit", "-q", "-am", "head")
+    head = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "checkout", "-q", "--detach", "HEAD~1")
+    _git(repo, "branch", "-D", "main")
+
+    monkeypatch.setenv("LD_PRELOAD", str(shim))
+    monkeypatch.setenv("FAKE_FOREIGN_UNDER", str(repo.resolve()))
+    plain = subprocess.run(["git", "status"], cwd=repo, env={**os.environ, **isolation.GIT_ENV}, capture_output=True)  # noqa: S607
+    if b"dubious ownership" not in plain.stderr:
+        pytest.skip("the shim cannot fake file ownership on this system")
+    return repo, head
+
+
+def test_sandbox_from_foreign_owned_checkout(foreign_checkout: tuple[Path, str], tmp_path: Path) -> None:
+    repo, head = foreign_checkout
+
+    sandbox = prepare_sandbox(repo, tmp_path / "work" / "sandbox", head)
+
+    assert (sandbox / "app.py").read_text() == "head\n"
+    assert not (tmp_path / "pwned").exists() and not Path("pwned").exists()
+
+
+def test_foreign_owned_checkout_needs_upload_pack_trust(
+    foreign_checkout: tuple[Path, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without the --upload-pack value, the env-only trust is not enough (the failure Task 16 hit)."""
+    repo, head = foreign_checkout
+    monkeypatch.setattr(isolation, "trusted_upload_pack", lambda source: "git upload-pack")
+
+    with pytest.raises(isolation.AgentStepError, match="dubious ownership"):
+        prepare_sandbox(repo, tmp_path / "work" / "sandbox", head)
+
+
+def test_upload_pack_trusts_exactly_the_checkout(tmp_path: Path) -> None:
+    source = tmp_path / "a b" / ".." / "co $(rm -rf ~); `x` 'q'"
+    value = trusted_upload_pack(source)
+    assert shlex.split(value) == ["git", "-c", f"safe.directory={source.resolve()}/.git", "upload-pack"]
+    assert "*" not in value
+
+
+def test_clone_and_fetch_pass_upload_pack(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = tmp_path / "checkout"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    (repo / "app.py").write_text("base\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "base")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "head")
+    head = _git(repo, "rev-parse", "HEAD").strip()
+    _git(repo, "checkout", "-q", "--detach", "HEAD~1")
+    _git(repo, "branch", "-D", "main")
+    calls: list[list[str]] = []
+    real = subprocess.run
+
+    def spy(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        return real(cmd, **kw)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(isolation.subprocess, "run", spy)
+    sandbox = tmp_path / "work" / "sandbox"
+    prepare_sandbox(repo, sandbox, head)
+
+    expected = f"--upload-pack={trusted_upload_pack(repo)}"
+    by_verb = {cmd[1]: cmd for cmd in calls if cmd[1] in ("clone", "fetch")}
+    assert expected in by_verb["clone"] and expected in by_verb["fetch"]
+    assert _git(sandbox, "rev-parse", "HEAD").strip() == head
