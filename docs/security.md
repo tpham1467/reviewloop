@@ -38,9 +38,8 @@ How each CLI is restricted, and why Codex and Cursor are experimental, is in
 - Config and repository rule files are read from the target branch only.
 - PR text, ticket text, thread replies and the diff reach the agent as files, never inside its instructions, and the
   agent is told to treat them as data.
-- Commands run only for users who pass reviewloop's permission check. On GitHub that is the comment's
-  `author_association` `OWNER`, `MEMBER` or `COLLABORATOR`, which also covers organization members and read-only
-  collaborators. On GitLab it is the Developer role or higher, read from the API.
+- Commands run only for users with write access, read from the API: on GitHub write, maintain or admin permission on
+  the repository (the comment's `author_association` is not trusted); on GitLab the Developer role or higher.
 - Fork pull requests are not reviewed automatically. A maintainer runs `/reviewloop review`.
 
 ## CI setup checklist
