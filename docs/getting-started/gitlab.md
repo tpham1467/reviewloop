@@ -91,6 +91,8 @@ GitLab CI does not start on comments, so a webhook starts a trigger pipeline.
       # ... the job's existing rules, or `- when: on_success`
     ```
 
+    Jobs that use `only`/`except` instead of `rules` need `except: [triggers]`.
+
     See [`examples/gitlab-ci.yml`](https://github.com/tpham1467/reviewloop/blob/main/examples/gitlab-ci.yml). If
     you already use trigger pipelines for something else, key those jobs on a variable your other trigger callers set
     instead.

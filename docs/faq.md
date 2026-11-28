@@ -14,7 +14,7 @@ resolves the fixed threads.
 
 Code `2` is an infrastructure error: the agent failed or timed out, the VCS API failed, or a file could not be
 reviewed. The summary comment names the failed step or files, and the job log has the details (secrets redacted). Set
-`REVIEWLOOP_KEEP_WORKDIR=1` to keep the agent's inputs and transcripts in the work directory: `$RUNNER_TEMP/reviewloop-*`
+`REVIEWLOOP_KEEP_WORKDIR=1` to keep the agent's inputs and transcripts in the work directory: `$RUNNER_TEMP/reviewloop/reviewloop-*`
 with the GitHub Action (upload it as an artifact to read it), `$CI_BUILDS_DIR/reviewloop-*` on GitLab.
 
 ## "get-diff: git merge-base failed"

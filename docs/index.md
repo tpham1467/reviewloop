@@ -19,7 +19,8 @@ open threads when you ask.
 
 ## How a review runs
 
-1. A pull request opens, or someone with write access comments `/reviewloop review`.
+1. A pull request opens, or an allowed user comments `/reviewloop review` (see
+   [Security](security.md#untrusted-pull-requests)).
 2. reviewloop computes the diff, reads `.reviewloop.yml` and rule files from the target branch, and fetches linked
    tickets.
 3. The agent reviews the diff in a sandbox; an optional security branch runs opengrep, gitleaks and two security

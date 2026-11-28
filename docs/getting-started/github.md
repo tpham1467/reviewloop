@@ -63,12 +63,14 @@ Open a pull request. The job posts a "reviewing" summary comment, then inline fi
 - **Triggers.** An opened, reopened or ready-for-review pull request starts a review. A push does not (no
   `synchronize`: with `cancel-in-progress`, every push would cancel a running review); comment `/reviewloop recheck`
   after fixing. Draft pull requests are skipped until they are marked ready (`review_drafts: true` changes that).
-- **Comment filter.** The job runs only for `/reviewloop` comments from users whose `author_association` is `OWNER`,
-  `MEMBER` or `COLLABORATOR`. reviewloop checks write access again itself; the filter keeps other users from starting
-  jobs at all.
+- **Comment filter.** The job runs only for `/reviewloop` comments whose `author_association` is `OWNER`, `MEMBER` or
+  `COLLABORATOR`. This only narrows who can start a run; it is not a permission check. `MEMBER` is any member of the
+  organization that owns the repository, and `COLLABORATOR` includes read-only collaborators. Inside the run, reviewloop
+  decides whether to accept the command (see [Commands](#commands)).
 - **Concurrency** is set on the job, not the workflow, so it applies only to runs that pass the `if`. A workflow-level
-  group would let any comment, even "LGTM", cancel a running review. A command from a user with write access still
-  cancels a running review on the same pull request, including `/reviewloop help`.
+  group would let any comment, even "LGTM", cancel a running review. These still cancel a running review on the same
+  pull request: a `/reviewloop` comment from any `OWNER`, `MEMBER` or `COLLABORATOR`, including `/reviewloop help` and
+  a command reviewloop then refuses, and the `reopened` and `ready_for_review` events.
 - **Checkout.** The job checks out the trusted base branch and fetches the pull request head as git objects only.
   `persist-credentials: false` keeps the token out of `.git/config`; the fetch passes it on that one command.
 - **Token.** The run's `GITHUB_TOKEN` with `contents: read` and `pull-requests: write` reads the pull request and
@@ -85,8 +87,10 @@ Comment on the pull request:
 | `/reviewloop recheck` | Re-check open findings against new commits and replies; resolve fixed threads |
 | `/reviewloop help` | Post the command list |
 
-Only users whose `author_association` is `OWNER`, `MEMBER` or `COLLABORATOR` can run commands. Any other comment
-exits within seconds without calling an agent.
+reviewloop accepts a command when its permission check passes. For a comment, the check uses the comment's
+`author_association`: `OWNER`, `MEMBER` or `COLLABORATOR`. That is broader than write access: it includes every member
+of the owning organization and read-only collaborators. Any other comment exits within seconds without calling an
+agent.
 
 ## Fork pull requests
 

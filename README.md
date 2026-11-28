@@ -61,7 +61,8 @@ Details, including `workflow:rules` and the webhook: [docs/getting-started/gitla
 
 ## How it works
 
-1. A pull request opens, or a user with write access comments `/reviewloop review`.
+1. A pull request opens, or an allowed user comments `/reviewloop review` (GitHub: repository owner, organization
+   member or collaborator; GitLab: Developer or higher).
 2. reviewloop computes the diff and reads `.reviewloop.yml`, rule files and linked tickets from the target branch.
 3. Your agent CLI reviews the diff in a sandboxed copy and writes JSON; a security branch runs in parallel.
 4. A quality gate filters the findings; reviewloop anchors each one on its quoted code and posts it.
@@ -72,8 +73,9 @@ Details, including `workflow:rules` and the webhook: [docs/getting-started/gitla
 - The agent never sees the VCS or tracker token and cannot post. It gets a credential-free copy of the checkout, a
   scrubbed environment with only its model credential, read tools, `git log|blame|show|diff`, and one output file.
   Any other change fails the run.
-- Config and rules come from the target branch; PR text reaches the agent as data. Commands need write access. Fork
-  pull requests are reviewed only when a maintainer asks.
+- Config and rules come from the target branch; PR text reaches the agent as data. Commands are limited to
+  repository owners, organization members and collaborators (GitHub) or Developers and higher (GitLab). Fork pull
+  requests are reviewed only when a maintainer asks.
 - Use an API key, cloud credentials or OIDC for teams. Never share a personal subscription token across a team.
 
 More: [docs/security.md](docs/security.md), [ADR 0002](docs/adr/0002-agent-tool-restriction.md).
